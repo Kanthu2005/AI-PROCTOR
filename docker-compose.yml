@@ -1,0 +1,72 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: proctorai-postgres
+    restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-proctorai_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-proctorai_secure_pass}
+      POSTGRES_DB: ${POSTGRES_DB:-proctorai_db}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-proctorai_user} -d ${POSTGRES_DB:-proctorai_db}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  mongodb:
+    image: mongo:6.0
+    container_name: proctorai-mongodb
+    restart: always
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: ../Dockerfile.backend
+    container_name: proctorai-backend
+    restart: always
+    ports:
+      - "8000:8000"
+    environment:
+      ENVIRONMENT: production
+      DATABASE_URL: postgresql://${POSTGRES_USER:-proctorai_user}:${POSTGRES_PASSWORD:-proctorai_secure_pass}@postgres:5432/${POSTGRES_DB:-proctorai_db}
+      POSTGRES_SERVER: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: ${POSTGRES_USER:-proctorai_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-proctorai_secure_pass}
+      POSTGRES_DB: ${POSTGRES_DB:-proctorai_db}
+      MONGODB_URL: mongodb://mongodb:27017
+      MONGODB_DB_NAME: proctorai_telemetry
+      SECRET_KEY: ${SECRET_KEY:-proctorai_super_secret_signing_key_32_characters_long_min}
+      USE_DOCKER_SANDBOX: "True"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mongodb:
+        condition: service_started
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: proctorai-frontend
+    restart: always
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+
+volumes:
+  postgres_data:
+  mongo_data:

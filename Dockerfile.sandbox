@@ -1,0 +1,13 @@
+FROM python:3.11-slim
+
+# Create unprivileged execution user
+RUN groupadd -r sandbox && useradd -r -g sandbox sandbox
+
+WORKDIR /sandbox
+
+# Restrict permissions
+RUN chown -R sandbox:sandbox /sandbox
+
+USER sandbox
+
+CMD ["python", "-c", "import sys; print('Sandbox ready')"]
