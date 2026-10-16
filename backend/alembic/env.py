@@ -12,7 +12,7 @@ import sys
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from app.config import settings
-from app.database import Base
+from app.database import Base, resolve_database_url
 import app.models  # noqa: F401
 
 # this is the Alembic Config object, which provides
@@ -20,7 +20,7 @@ import app.models  # noqa: F401
 config = context.config
 
 # Set sqlalchemy.url from our settings
-config.set_main_option("sqlalchemy.url", settings.DATABASE_URL)
+config.set_main_option("sqlalchemy.url", resolve_database_url(settings.DATABASE_URL))
 
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.
@@ -63,7 +63,7 @@ def run_migrations_online() -> None:
 
     """
     configuration = config.get_section(config.config_ini_section, {}).copy()
-    configuration["sqlalchemy.url"] = settings.DATABASE_URL
+    configuration["sqlalchemy.url"] = resolve_database_url(settings.DATABASE_URL)
     
     connect_args = {}
     if settings.is_sqlite:

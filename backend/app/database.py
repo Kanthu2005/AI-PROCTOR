@@ -5,6 +5,24 @@ from app.config import settings
 
 logger = logging.getLogger("proctorai.database")
 
+def resolve_database_url(url: str) -> str:
+    """
+    Ensure PostgreSQL URLs use an installed DBAPI driver (psycopg or psycopg2).
+    If url starts with 'postgresql://', detects which driver is available.
+    """
+    if url.startswith("postgresql://"):
+        try:
+            import psycopg  # noqa: F401
+            return url
+        except ImportError:
+            try:
+                import psycopg2  # noqa: F401
+                return url.replace("postgresql://", "postgresql+psycopg2://", 1)
+            except ImportError:
+                return url
+    return url
+
+
 # SQLAlchemy setup
 connect_args = {}
 engine_kwargs = {
@@ -23,7 +41,7 @@ else:
     engine_kwargs["pool_recycle"] = settings.DB_POOL_RECYCLE
 
 engine = create_engine(
-    settings.DATABASE_URL,
+    resolve_database_url(settings.DATABASE_URL),
     **engine_kwargs
 )
 
