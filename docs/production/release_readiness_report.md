@@ -93,9 +93,9 @@ The linear Alembic migration graph has been verified:
        ▼
 003_add_question_topic
        ▼
-004_attempt_receipt_and_constraints
+004_attempt_constraints
        ▼
-005_evaluation_and_descriptive_scoring
+005_eval_and_scoring
        ▼
 006_coding_submissions
        ▼

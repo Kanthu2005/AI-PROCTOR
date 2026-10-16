@@ -1,7 +1,7 @@
-"""005_evaluation_and_descriptive_scoring
+"""005_eval_and_scoring
 
-Revision ID: 005_evaluation_and_descriptive_scoring
-Revises: 004_attempt_receipt_and_constraints
+Revision ID: 005_eval_and_scoring
+Revises: 004_attempt_constraints
 Create Date: 2026-10-16 23:10:00.000000
 
 """
@@ -10,8 +10,8 @@ from alembic import op
 import sqlalchemy as sa
 
 
-revision: str = '005_evaluation_and_descriptive_scoring'
-down_revision: Union[str, Sequence[str], None] = '004_attempt_receipt_and_constraints'
+revision: str = '005_eval_and_scoring'
+down_revision: Union[str, Sequence[str], None] = '004_attempt_constraints'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

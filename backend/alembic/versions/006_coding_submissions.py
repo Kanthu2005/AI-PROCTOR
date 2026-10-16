@@ -1,7 +1,7 @@
 """006_coding_submissions
 
 Revision ID: 006_coding_submissions
-Revises: 005_evaluation_and_descriptive_scoring
+Revises: 005_eval_and_scoring
 Create Date: 2026-10-16 23:30:00.000000
 
 """
@@ -11,7 +11,7 @@ import sqlalchemy as sa
 
 
 revision: str = '006_coding_submissions'
-down_revision: Union[str, Sequence[str], None] = '005_evaluation_and_descriptive_scoring'
+down_revision: Union[str, Sequence[str], None] = '005_eval_and_scoring'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

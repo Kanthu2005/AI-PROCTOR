@@ -1,6 +1,6 @@
-"""004_attempt_receipt_and_constraints
+"""004_attempt_constraints
  
-Revision ID: 004_attempt_receipt_and_constraints
+Revision ID: 004_attempt_constraints
 Revises: 003_add_question_topic
 Create Date: 2026-10-16 22:30:00.000000
 
@@ -10,7 +10,7 @@ from alembic import op
 import sqlalchemy as sa
 
 
-revision: str = '004_attempt_receipt_and_constraints'
+revision: str = '004_attempt_constraints'
 down_revision: Union[str, Sequence[str], None] = '003_add_question_topic'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
