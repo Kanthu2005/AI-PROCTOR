@@ -142,7 +142,7 @@ def submit_attempt(
     flagged_count = len([a for a in attempt.answers if a.is_flagged_for_review])
     unanswered_count = max(0, total_q - answered_count)
 
-    return {
+    response_payload = {
         "attempt_id": attempt.id,
         "candidate_name": attempt.candidate_name,
         "candidate_email": attempt.candidate_email,
@@ -154,10 +154,23 @@ def submit_attempt(
         "answered_count": answered_count,
         "unanswered_count": unanswered_count,
         "flagged_count": flagged_count,
-        "is_result_released": False,
-        "results_policy": "RECRUITER_INDIVIDUAL_REVIEW",
+        "is_result_released": getattr(attempt, 'is_result_released', False),
+        "results_policy": getattr(attempt.assessment, 'result_publication_policy', 'MANUAL'),
         "message": "Your examination has been securely finalized and recorded in the ProctorAI database. Evaluation and integrity checks are under recruiter review."
     }
+
+    pub_policy = getattr(attempt.assessment, 'result_publication_policy', 'MANUAL')
+    if pub_policy == "IMMEDIATE" or getattr(attempt, 'is_result_released', False):
+        response_payload["total_score"] = attempt.total_score
+        response_payload["total_max_marks"] = attempt.total_max_marks
+        response_payload["percentage"] = attempt.percentage
+        response_payload["is_passed"] = attempt.is_passed
+        response_payload["rank"] = attempt.rank
+        response_payload["percentile"] = attempt.percentile
+        response_payload["risk_score"] = attempt.risk_score
+        response_payload["risk_level"] = attempt.risk_level.value
+
+    return response_payload
 
 
 @router.get("/{attempt_id}/result", response_model=Dict[str, Any])
@@ -169,9 +182,11 @@ def get_attempt_result(
     if not attempt:
         raise HTTPException(status_code=404, detail="Attempt not found")
 
+    pub_policy = getattr(attempt.assessment, 'result_publication_policy', 'MANUAL') if attempt.assessment else 'MANUAL'
     is_released = bool(
         getattr(attempt, 'is_result_released', False) or
-        (attempt.assessment and getattr(attempt.assessment, 'is_results_released', False))
+        (attempt.assessment and getattr(attempt.assessment, 'is_results_released', False)) or
+        (pub_policy == "IMMEDIATE")
     )
 
     if not is_released:

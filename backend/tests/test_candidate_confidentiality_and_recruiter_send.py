@@ -41,6 +41,7 @@ def test_candidate_submission_receipt_confidentiality_and_recruiter_send(client,
         "total_duration_minutes": 60,
         "total_marks": 10.0,
         "passing_percentage": 50.0,
+        "result_publication_policy": "MANUAL",
         "sections": [
             {
                 "title": "Core Section",
