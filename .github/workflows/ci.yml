@@ -52,18 +52,20 @@ jobs:
         run: |
           bandit -r backend/app -x backend/app/seed_*.py -ll -ii || true
 
-      - name: Validate Alembic Migrations
+      - name: Validate Alembic Migrations & Seed Test DB
         env:
           DATABASE_URL: postgresql://proctorai_user:proctorai_secure_pass@localhost:5432/proctorai_test_db
         working-directory: backend
         run: |
           alembic upgrade head
+          python -m app.seed_demo_accounts
 
       - name: Run Complete Pytest Suite
         env:
           ENVIRONMENT: testing
           SECRET_KEY: test-secret-key-32chars-minimum-signing-key!
           DATABASE_URL: sqlite:///./test_ci.db
+          POSTGRES_DATABASE_URL: postgresql://proctorai_user:proctorai_secure_pass@localhost:5432/proctorai_test_db
           INTERNAL_RUNNER_SECRET: test-runner-secret-key-32chars-min!
         working-directory: backend
         run: |
