@@ -44,11 +44,6 @@ class Settings(BaseSettings):
     DB_MAX_OVERFLOW: int = int(os.getenv("DB_MAX_OVERFLOW", "20"))
     DB_POOL_TIMEOUT: int = int(os.getenv("DB_POOL_TIMEOUT", "30"))
     DB_POOL_RECYCLE: int = int(os.getenv("DB_POOL_RECYCLE", "1800"))
-    
-    # MongoDB for Telemetry & High-volume proctoring logs
-    MONGODB_URL: str = os.getenv("MONGODB_URL", "mongodb://localhost:27017")
-    MONGODB_DB_NAME: str = os.getenv("MONGODB_DB_NAME", "proctorai_telemetry")
-    
     # Execution Sandbox & Security Boundary
     USE_DOCKER_SANDBOX: bool = os.getenv("USE_DOCKER_SANDBOX", "True").lower() in ("true", "1")
     DOCKER_SANDBOX_IMAGE: str = "python:3.11-slim"
@@ -65,6 +60,23 @@ class Settings(BaseSettings):
     PROCTORING_EVIDENCE_RETENTION_DAYS: int = int(os.getenv("PROCTORING_EVIDENCE_RETENTION_DAYS", "30"))
     PROCTORING_DEDUP_WINDOW_SECONDS: int = int(os.getenv("PROCTORING_DEDUP_WINDOW_SECONDS", "3"))
     PROCTORING_RULE_VERSION: str = "2026.1-explainable"
+
+    # Email Service & Provider Configuration
+    EMAIL_PROVIDER: str = os.getenv("EMAIL_PROVIDER", "resend")  # resend | smtp | mock
+    EMAIL_FROM_ADDRESS: str = os.getenv("EMAIL_FROM_ADDRESS", "assessments@proctorai.live")
+    EMAIL_FROM_NAME: str = os.getenv("EMAIL_FROM_NAME", "ProctorAI Assessments")
+    RESEND_API_KEY: str = os.getenv("RESEND_API_KEY", "")
+    SMTP_HOST: str = os.getenv("SMTP_HOST", "smtp.gmail.com")
+    SMTP_PORT: int = int(os.getenv("SMTP_PORT", "587"))
+    SMTP_USER: str = os.getenv("SMTP_USER", "")
+    SMTP_PASSWORD: str = os.getenv("SMTP_PASSWORD", "")
+    SMTP_USE_TLS: bool = os.getenv("SMTP_USE_TLS", "True").lower() in ("true", "1")
+    SMTP_USE_SSL: bool = os.getenv("SMTP_USE_SSL", "False").lower() in ("true", "1")
+    FRONTEND_BASE_URL: str = os.getenv("FRONTEND_BASE_URL", "http://localhost:5173")
+    BACKEND_BASE_URL: str = os.getenv("BACKEND_BASE_URL", "http://localhost:8000")
+    EMAIL_RATE_LIMIT_PER_MINUTE: int = int(os.getenv("EMAIL_RATE_LIMIT_PER_MINUTE", "60"))
+    EMAIL_MAX_BULK_RECIPIENTS: int = int(os.getenv("EMAIL_MAX_BULK_RECIPIENTS", "50"))
+    EMAIL_WEBHOOK_SECRET: str = os.getenv("EMAIL_WEBHOOK_SECRET", "")
     
     # CORS (can be list or comma-separated string)
     CORS_ORIGINS: Union[List[str], str] = ["*"]

@@ -1,0 +1,40 @@
+services:
+  - type: web
+    name: proctorai-backend
+    runtime: python
+    rootDir: backend
+    plan: free
+    region: oregon
+    buildCommand: pip install -r requirements.txt && alembic upgrade head
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
+      - key: ENVIRONMENT
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: proctorai-db
+          property: connectionString
+      - key: SECRET_KEY
+        generateValue: true
+      - key: CORS_ORIGINS
+        value: "*"
+      - key: EMAIL_PROVIDER
+        value: resend
+      - key: RESEND_API_KEY
+        sync: false
+      - key: EMAIL_FROM_ADDRESS
+        value: onboarding@resend.dev
+      - key: FRONTEND_BASE_URL
+        sync: false
+      - key: BACKEND_BASE_URL
+        sync: false
+
+databases:
+  - name: proctorai-db
+    databaseName: proctorai_db
+    user: proctorai_user
+    plan: free
+    region: oregon

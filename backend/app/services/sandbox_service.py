@@ -328,6 +328,12 @@ class CodingSandboxRunner:
                             overall_failure_type = "OUTPUT_LIMIT_EXCEEDED"
                         continue
 
+                    def _norm(s: str) -> str:
+                        if not s:
+                            return ""
+                        lines = [line.rstrip() for line in s.replace("\r\n", "\n").replace("\r", "\n").strip().split("\n")]
+                        return "\n".join(lines).strip()
+
                     actual_output = stdout.strip()
                     error_output = stderr.strip()
 
@@ -357,7 +363,7 @@ class CodingSandboxRunner:
                             "failure_type": failure_type
                         })
                     else:
-                        passed = (actual_output == expected_output)
+                        passed = (_norm(actual_output) == _norm(expected_output))
                         if passed:
                             passed_count += 1
                         else:

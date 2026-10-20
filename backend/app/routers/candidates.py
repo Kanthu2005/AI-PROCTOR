@@ -115,9 +115,24 @@ def list_all_candidates(
     for inv in invitations:
         risk_level = "LOW"
         risk_score = 0
+        total_score = None
+        percentage = None
+        is_passed = None
+        is_result_released = False
+        result_decision = None
+        result_released_at = None
+        recruiter_feedback = None
+
         if inv.attempt:
             risk_level = inv.attempt.risk_level.value
             risk_score = inv.attempt.risk_score
+            total_score = inv.attempt.total_score
+            percentage = inv.attempt.percentage
+            is_passed = inv.attempt.is_passed
+            is_result_released = getattr(inv.attempt, 'is_result_released', False)
+            result_decision = getattr(inv.attempt, 'result_decision', None)
+            result_released_at = inv.attempt.result_released_at.isoformat() if inv.attempt.result_released_at else None
+            recruiter_feedback = getattr(inv.attempt, 'recruiter_feedback', None)
 
         results.append({
             "id": inv.id,
@@ -130,7 +145,14 @@ def list_all_candidates(
             "expires_at": inv.expires_at.isoformat() if inv.expires_at else None,
             "risk_level": risk_level,
             "risk_score": risk_score,
-            "attempt_id": inv.attempt.id if inv.attempt else None
+            "attempt_id": inv.attempt.id if inv.attempt else None,
+            "total_score": total_score,
+            "percentage": percentage,
+            "is_passed": is_passed,
+            "is_result_released": is_result_released,
+            "result_decision": result_decision,
+            "result_released_at": result_released_at,
+            "recruiter_feedback": recruiter_feedback
         })
     return results
 
@@ -142,6 +164,7 @@ def get_my_invitations(
 ):
     """
     Returns assessments and invitations assigned to the currently logged in candidate.
+    Scores, percentages, and pass/fail states are strictly hidden until released by recruiter.
     """
     query = db.query(CandidateInvitation).filter(
         CandidateInvitation.email == current_user.email.lower()
@@ -150,15 +173,25 @@ def get_my_invitations(
 
     results = []
     for inv in invitations:
-        risk_level = "LOW"
-        risk_score = 0
+        risk_level = None
+        risk_score = None
         score = None
         is_passed = None
+        is_released = False
+        result_decision = "PENDING_REVIEW"
+        recruiter_feedback = None
+
         if inv.attempt:
-            risk_level = inv.attempt.risk_level.value
-            risk_score = inv.attempt.risk_score
-            score = inv.attempt.total_score
-            is_passed = inv.attempt.is_passed
+            # Check individual release on attempt OR global assessment release
+            is_released = bool(
+                getattr(inv.attempt, 'is_result_released', False) or
+                (inv.assessment and getattr(inv.assessment, 'is_results_released', False))
+            )
+            if is_released:
+                score = inv.attempt.total_score
+                is_passed = (inv.attempt.result_decision == "PASSED") if getattr(inv.attempt, 'result_decision', None) else inv.attempt.is_passed
+                result_decision = getattr(inv.attempt, 'result_decision', None) or ("PASSED" if is_passed else "COMPLETED")
+                recruiter_feedback = getattr(inv.attempt, 'recruiter_feedback', None)
 
         results.append({
             "id": inv.id,
@@ -174,7 +207,10 @@ def get_my_invitations(
             "risk_score": risk_score,
             "attempt_id": inv.attempt.id if inv.attempt else None,
             "total_score": score,
-            "is_passed": is_passed
+            "is_passed": is_passed,
+            "is_result_released": is_released,
+            "result_decision": result_decision,
+            "recruiter_feedback": recruiter_feedback
         })
     return results
 

@@ -74,11 +74,16 @@ def require_roles(*allowed_roles: Role):
     """
     Role-Based Access Control dependency factory.
     Platform Admin has universal access.
+    Supports consolidated ADMIN_RECRUITER role and legacy mapped roles.
     """
     def role_checker(current_user: User = Depends(get_current_user)) -> User:
         if current_user.role == Role.PLATFORM_ADMIN:
             return current_user
-        if current_user.role not in allowed_roles:
+        
+        effective_user_role = Role.normalize(current_user.role)
+        normalized_allowed = {Role.normalize(r) for r in allowed_roles}
+
+        if current_user.role not in allowed_roles and effective_user_role not in normalized_allowed:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"Access forbidden: requires one of {[r.value for r in allowed_roles]}"

@@ -25,7 +25,9 @@ import {
   HelpCircle,
   UserPlus,
   Play,
-  RefreshCw
+  RefreshCw,
+  Mail,
+  Send
 } from 'lucide-react';
 
 export default function RecruiterDashboard({ 
@@ -532,7 +534,15 @@ export default function RecruiterDashboard({
                         </div>
                       </td>
                       <td className="py-3 px-3 text-right">
-                        <div className="flex items-center justify-end space-x-2">
+                        <div className="flex items-center justify-end space-x-1.5">
+                          <button
+                            onClick={() => onOpenCandidateInvite && onOpenCandidateInvite({ id: a.id, title: a.name, ...a })}
+                            className="px-2.5 py-1 rounded-lg text-xs font-bold bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 transition flex items-center space-x-1"
+                            title="Send real exam invitation email"
+                          >
+                            <Mail className="w-3 h-3 text-blue-600" />
+                            <span>Invite</span>
+                          </button>
                           <button
                             onClick={() => {
                               if (a.token) {
@@ -541,7 +551,7 @@ export default function RecruiterDashboard({
                                 onNavigateTab('assessments');
                               }
                             }}
-                            className="px-2.5 py-1 rounded-lg text-xs font-semibold text-blue-600 hover:bg-blue-50 border border-blue-200 transition"
+                            className="px-2.5 py-1 rounded-lg text-xs font-semibold text-slate-600 hover:bg-slate-100 border border-slate-200 transition"
                           >
                             View
                           </button>
@@ -586,15 +596,21 @@ export default function RecruiterDashboard({
             </button>
 
             <button
-              onClick={() => onNavigateTab('candidates')}
+              onClick={() => {
+                if (onOpenCandidateInvite && recentAssessments.length > 0) {
+                  onOpenCandidateInvite(recentAssessments[0]);
+                } else {
+                  onNavigateTab('candidates');
+                }
+              }}
               className="p-3 bg-white rounded-xl border border-slate-200 hover:border-emerald-400 shadow-xs hover:shadow-sm text-left transition flex items-center space-x-2.5 group"
             >
               <div className="w-8 h-8 rounded-lg bg-emerald-500 text-white flex items-center justify-center flex-shrink-0 group-hover:scale-105 transition-transform">
-                <UserPlus className="w-4 h-4" />
+                <Mail className="w-4 h-4" />
               </div>
               <div className="truncate">
-                <div className="text-xs font-bold text-slate-900">Invite Candidates</div>
-                <div className="text-[10px] text-slate-500">Send invitation links</div>
+                <div className="text-xs font-bold text-slate-900">Send Invitations</div>
+                <div className="text-[10px] text-slate-500">Real email dispatch</div>
               </div>
             </button>
 

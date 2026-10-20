@@ -36,6 +36,7 @@ class QuestionService:
             options=[opt.model_dump() for opt in q_in.options] if q_in.options else [],
             coding_details=q_in.coding_details.model_dump() if q_in.coding_details else {},
             sql_details=q_in.sql_details.model_dump() if q_in.sql_details else {},
+            descriptive_details=q_in.descriptive_details.model_dump() if q_in.descriptive_details else {},
             review_status=q_in.review_status,
             is_published=q_in.is_published,
             created_by_id=user_id
@@ -66,6 +67,35 @@ class QuestionService:
 
         new_version_num = question.current_version_number + 1
 
+        # Validate options if updated
+        target_type = latest_version.question_type
+        if q_update.options is not None:
+            if target_type == QuestionType.MCQ_SINGLE:
+                if len(q_update.options) < 2:
+                    raise HTTPException(status_code=400, detail="MCQ_SINGLE requires at least 2 options")
+                correct = sum(1 for o in q_update.options if o.is_correct)
+                if correct != 1:
+                    raise HTTPException(status_code=400, detail=f"MCQ_SINGLE must have exactly 1 correct option, found {correct}")
+            elif target_type == QuestionType.MCQ_MULTIPLE:
+                if len(q_update.options) < 2:
+                    raise HTTPException(status_code=400, detail="MCQ_MULTIPLE requires at least 2 options")
+                correct = sum(1 for o in q_update.options if o.is_correct)
+                if correct < 1:
+                    raise HTTPException(status_code=400, detail="MCQ_MULTIPLE must have at least 1 correct option")
+            elif target_type == QuestionType.TRUE_FALSE:
+                if len(q_update.options) != 2:
+                    raise HTTPException(status_code=400, detail="TRUE_FALSE question must have exactly 2 options")
+                correct = sum(1 for o in q_update.options if o.is_correct)
+                if correct != 1:
+                    raise HTTPException(status_code=400, detail="TRUE_FALSE question must have exactly 1 correct option")
+
+        if q_update.coding_details is not None and target_type == QuestionType.CODING:
+            if not q_update.coding_details.test_cases:
+                raise HTTPException(status_code=400, detail="Python CODING questions must have at least 1 test case")
+            for idx, tc in enumerate(q_update.coding_details.test_cases):
+                if tc.expected_output is None or str(tc.expected_output).strip() == "":
+                    raise HTTPException(status_code=400, detail=f"Test case #{idx + 1} must have a non-empty expected_output")
+
         # Use new fields if provided, else copy from latest version
         new_version = QuestionVersion(
             question_id=question.id,
@@ -82,6 +112,7 @@ class QuestionService:
             options=[opt.model_dump() for opt in q_update.options] if q_update.options is not None else latest_version.options,
             coding_details=q_update.coding_details.model_dump() if q_update.coding_details is not None else latest_version.coding_details,
             sql_details=q_update.sql_details.model_dump() if q_update.sql_details is not None else latest_version.sql_details,
+            descriptive_details=q_update.descriptive_details.model_dump() if q_update.descriptive_details is not None else getattr(latest_version, "descriptive_details", {}),
             review_status=q_update.review_status if q_update.review_status is not None else latest_version.review_status,
             is_published=q_update.is_published if q_update.is_published is not None else latest_version.is_published,
             created_by_id=user_id

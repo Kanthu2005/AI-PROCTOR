@@ -27,6 +27,7 @@ from app.routers import (
     ws_router,
     health_router,
     seb_router,
+    invitations_router,
 )
 
 logging.basicConfig(level=logging.INFO)
@@ -126,5 +127,7 @@ app.include_router(sandbox_router, prefix=settings.API_V1_STR)
 app.include_router(coding_router, prefix=settings.API_V1_STR)
 app.include_router(analytics_router, prefix=settings.API_V1_STR)
 app.include_router(seb_router, prefix=settings.API_V1_STR)
+app.include_router(invitations_router, prefix=settings.API_V1_STR)
+app.include_router(invitations_router, prefix="/api")
 app.include_router(ws_router)
 app.include_router(ws_router, prefix=settings.API_V1_STR)

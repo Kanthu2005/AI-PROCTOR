@@ -11,7 +11,6 @@ from app.models.proctoring import (
     ProctoringIncident, EventType, IncidentSeverity, ProctorReviewDecision, ProctoringEvidenceAccessAudit
 )
 from app.models.user import User
-from app.database import get_mongo_db
 from app.schemas.proctoring import ProctoringEventIngest
 from app.utils.cv_proctor import CVProctorEngine
 
@@ -314,28 +313,6 @@ class ProctoringService:
         )
         db.add(incident)
         db.commit()
-        db.refresh(incident)
-
-        # 7. High-volume MongoDB telemetry ingestion
-        try:
-            mongo_db = get_mongo_db()
-            mongo_db["proctoring_telemetry_events"].insert_one({
-                "incident_id": incident.id,
-                "attempt_id": attempt.id,
-                "assessment_id": attempt.assessment_id,
-                "event_type": event_in.event_type.value,
-                "severity": severity.value,
-                "risk_points": points,
-                "accumulated_risk_score": attempt.risk_score,
-                "current_risk_level": attempt.risk_level.value,
-                "is_deduplicated": is_deduplicated,
-                "metadata": incident.metadata_json,
-                "rule_version": settings.PROCTORING_RULE_VERSION,
-                "timestamp": now_utc.isoformat()
-            })
-        except Exception as e:
-            logger.error(f"Failed to log proctoring telemetry to MongoDB: {e}")
-
         return {
             "id": incident.id,
             "attempt_id": attempt.id,

@@ -14,10 +14,11 @@ import {
   AlertTriangle,
   X,
   Calendar,
-  Sparkles
+  Sparkles,
+  Send
 } from 'lucide-react';
 
-export default function CandidateManagement({ onLaunchCandidateExam }) {
+export default function CandidateManagement({ onLaunchCandidateExam, onOpenCandidateInvite }) {
   const { user } = useAuth();
   const [candidates, setCandidates] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -27,6 +28,10 @@ export default function CandidateManagement({ onLaunchCandidateExam }) {
   // Modal states
   const [showInviteModal, setShowInviteModal] = useState(false);
   const [showBulkModal, setShowBulkModal] = useState(false);
+  const [selectedCandidateForResult, setSelectedCandidateForResult] = useState(null);
+  const [resultDecision, setResultDecision] = useState('PASSED');
+  const [resultFeedback, setResultFeedback] = useState('');
+  const [sendingResult, setSendingResult] = useState(false);
 
   // Invite Form
   const [candidateName, setCandidateName] = useState('Rahul Sharma');
@@ -232,6 +237,46 @@ export default function CandidateManagement({ onLaunchCandidateExam }) {
     setTimeout(() => setCopied(false), 2000);
   };
 
+  const handleOpenSendResult = (cand) => {
+    setSelectedCandidateForResult(cand);
+    setResultDecision(cand.result_decision || (cand.is_passed ? 'PASSED' : 'FAILED'));
+    setResultFeedback(cand.recruiter_feedback || '');
+  };
+
+  const handleConfirmSendResult = async (e) => {
+    e.preventDefault();
+    if (!selectedCandidateForResult?.attempt_id) {
+      alert('No test attempt found for this candidate.');
+      return;
+    }
+    try {
+      setSendingResult(true);
+      await api.sendCandidateResult(
+        selectedCandidateForResult.attempt_id,
+        resultDecision,
+        resultFeedback
+      );
+      setCandidates(prev => prev.map(c => {
+        if (c.id === selectedCandidateForResult.id || c.attempt_id === selectedCandidateForResult.attempt_id) {
+          return {
+            ...c,
+            is_result_released: true,
+            result_decision: resultDecision,
+            recruiter_feedback: resultFeedback,
+            is_passed: resultDecision === 'PASSED' || resultDecision === 'SHORTLISTED'
+          };
+        }
+        return c;
+      }));
+      alert(`Assessment result (${resultDecision}) successfully sent to ${selectedCandidateForResult.full_name}!`);
+      setSelectedCandidateForResult(null);
+    } catch (err) {
+      alert(`Failed to send result: ${err.message}`);
+    } finally {
+      setSendingResult(false);
+    }
+  };
+
   const filtered = candidates.filter(c => {
     const matchSearch = !search || 
       c.full_name?.toLowerCase().includes(search.toLowerCase()) ||
@@ -256,17 +301,18 @@ export default function CandidateManagement({ onLaunchCandidateExam }) {
 
         <div className="flex items-center space-x-2.5">
           <button
-            onClick={() => setShowBulkModal(true)}
-            className="px-4 py-2.5 rounded-xl border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 font-bold text-xs shadow-xs transition"
-          >
-            Bulk CSV Upload
-          </button>
-          <button
-            onClick={() => setShowInviteModal(true)}
+            onClick={() => {
+              if (onOpenCandidateInvite) {
+                const target = assessments.find(a => a.id === selectedAssessmentId) || assessments[0] || { id: 'default', title: 'Technical Assessment' };
+                onOpenCandidateInvite(target);
+              } else {
+                setShowInviteModal(true);
+              }
+            }}
             className="px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs shadow-md shadow-blue-500/25 flex items-center space-x-2 transition"
           >
-            <UserPlus className="w-4 h-4" />
-            <span>+ Invite Candidate</span>
+            <Mail className="w-4 h-4" />
+            <span>Send Exam Invitation</span>
           </button>
         </div>
       </div>
@@ -328,22 +374,44 @@ export default function CandidateManagement({ onLaunchCandidateExam }) {
                     {c.assessment_title}
                   </td>
                   <td className="py-3.5 px-4">
-                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${
-                      c.status === 'SUBMITTED' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
-                      c.status === 'IN_PROGRESS' ? 'bg-blue-50 text-blue-700 border-blue-200' :
-                      'bg-slate-100 text-slate-700 border-slate-200'
-                    }`}>
-                      {c.status}
-                    </span>
+                    <div className="space-y-1">
+                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${
+                        c.status === 'SUBMITTED' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
+                        c.status === 'IN_PROGRESS' ? 'bg-blue-50 text-blue-700 border-blue-200' :
+                        'bg-slate-100 text-slate-700 border-slate-200'
+                      }`}>
+                        {c.status}
+                      </span>
+                      {c.status === 'SUBMITTED' && (
+                        <div>
+                          {c.is_result_released ? (
+                            <span className="inline-flex items-center space-x-1 px-1.5 py-0.5 rounded text-[9px] font-extrabold bg-emerald-100 text-emerald-800 border border-emerald-200">
+                              <span>✓ Sent: {c.result_decision || 'PASSED'}</span>
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center space-x-1 px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-50 text-amber-700 border border-amber-200">
+                              <span>⏳ Pending Decision</span>
+                            </span>
+                          )}
+                        </div>
+                      )}
+                    </div>
                   </td>
                   <td className="py-3.5 px-4 font-semibold">
-                    <span className={
-                      c.risk_level === 'HIGH' ? 'text-rose-600 font-bold' :
-                      c.risk_level === 'MEDIUM' ? 'text-amber-600' :
-                      'text-emerald-600'
-                    }>
-                      {c.risk_level || 'LOW'} ({c.risk_score ?? c.current_risk_score ?? 0}/100)
-                    </span>
+                    <div className="space-y-0.5">
+                      <div className={
+                        c.risk_level === 'HIGH' ? 'text-rose-600 font-bold' :
+                        c.risk_level === 'MEDIUM' ? 'text-amber-600' :
+                        'text-emerald-600'
+                      }>
+                        Risk: {c.risk_level || 'LOW'} ({c.risk_score ?? c.current_risk_score ?? 0}/100)
+                      </div>
+                      {c.total_score !== undefined && c.total_score !== null && (
+                        <div className="text-[11px] font-bold text-slate-800">
+                          Score: {c.total_score} ({c.percentage ?? 100}%)
+                        </div>
+                      )}
+                    </div>
                   </td>
                   <td className="py-3.5 px-4 font-mono text-[11px] text-slate-600">
                     <div className="flex items-center space-x-1.5">
@@ -363,6 +431,20 @@ export default function CandidateManagement({ onLaunchCandidateExam }) {
                   </td>
                   <td className="py-3.5 px-4 text-right">
                     <div className="flex items-center justify-end space-x-1.5">
+                      {c.status === 'SUBMITTED' && c.attempt_id && (
+                        <button
+                          onClick={() => handleOpenSendResult(c)}
+                          className={`px-3 py-1.5 rounded-lg font-bold text-xs shadow-xs transition flex items-center space-x-1 ${
+                            c.is_result_released
+                              ? 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200'
+                              : 'bg-indigo-600 hover:bg-indigo-700 text-white'
+                          }`}
+                          title="Review proctoring checks and send individual decision to candidate"
+                        >
+                          <Send className="w-3 h-3" />
+                          <span>{c.is_result_released ? 'Update Result' : 'Send Result'}</span>
+                        </button>
+                      )}
                       <button
                         onClick={() => handleResendInvitation(c.id)}
                         className="px-2.5 py-1.5 rounded-lg bg-slate-50 hover:bg-slate-100 text-slate-700 font-bold text-xs border border-slate-200 transition"
@@ -495,6 +577,145 @@ export default function CandidateManagement({ onLaunchCandidateExam }) {
                   className="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs shadow-md"
                 >
                   Upload & Dispatch
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Send Individual Result Modal */}
+      {selectedCandidateForResult && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl p-6 sm:p-8 max-w-lg w-full border border-slate-200 shadow-2xl space-y-5 animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <div className="flex items-center space-x-2.5">
+                <div className="w-9 h-9 rounded-xl bg-indigo-600 text-white flex items-center justify-center font-bold shadow-md shadow-indigo-500/20">
+                  <Send className="w-5 h-5" />
+                </div>
+                <div>
+                  <h2 className="text-base font-extrabold text-slate-900">
+                    Send Candidate Assessment Result
+                  </h2>
+                  <p className="text-[11px] text-slate-500">
+                    Review proctoring checks and release individual pass/fail decision.
+                  </p>
+                </div>
+              </div>
+              <button 
+                onClick={() => setSelectedCandidateForResult(null)} 
+                className="text-slate-400 hover:text-slate-600"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Candidate & Proctoring Summary Card */}
+            <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-2 text-xs">
+              <div className="flex justify-between">
+                <span className="text-slate-500 font-semibold">Candidate:</span>
+                <span className="font-bold text-slate-900">{selectedCandidateForResult.full_name} ({selectedCandidateForResult.email})</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500 font-semibold">Assessment:</span>
+                <span className="font-semibold text-slate-800">{selectedCandidateForResult.assessment_title}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500 font-semibold">Test Score:</span>
+                <span className="font-mono font-bold text-blue-700">
+                  {selectedCandidateForResult.total_score !== null && selectedCandidateForResult.total_score !== undefined 
+                    ? `${selectedCandidateForResult.total_score} pts (${selectedCandidateForResult.percentage ?? 100}%)`
+                    : 'Evaluated'}
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500 font-semibold">Proctoring Telemetry:</span>
+                <span className={`font-bold ${
+                  selectedCandidateForResult.risk_level === 'HIGH' ? 'text-rose-600' :
+                  selectedCandidateForResult.risk_level === 'MEDIUM' ? 'text-amber-600' : 'text-emerald-600'
+                }`}>
+                  {selectedCandidateForResult.risk_level || 'LOW'} Risk ({selectedCandidateForResult.risk_score || 0}/100)
+                </span>
+              </div>
+            </div>
+
+            {/* Authoritative Decision Form */}
+            <form onSubmit={handleConfirmSendResult} className="space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-slate-800 mb-2">
+                  Select Recruiter Decision
+                </label>
+                <div className="grid grid-cols-2 gap-2.5">
+                  <label className={`cursor-pointer p-3 rounded-xl border flex items-center space-x-2.5 transition ${
+                    resultDecision === 'PASSED' 
+                      ? 'border-emerald-500 bg-emerald-50 text-emerald-950 font-bold shadow-xs' 
+                      : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                  }`}>
+                    <input 
+                      type="radio" 
+                      name="decision" 
+                      value="PASSED"
+                      checked={resultDecision === 'PASSED'} 
+                      onChange={() => setResultDecision('PASSED')}
+                      className="accent-emerald-600"
+                    />
+                    <div className="text-xs">
+                      <div className="text-emerald-800">PASSED</div>
+                      <div className="text-[10px] text-emerald-700 font-normal">Passed test & proctoring</div>
+                    </div>
+                  </label>
+
+                  <label className={`cursor-pointer p-3 rounded-xl border flex items-center space-x-2.5 transition ${
+                    resultDecision === 'FAILED' 
+                      ? 'border-rose-500 bg-rose-50 text-rose-950 font-bold shadow-xs' 
+                      : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                  }`}>
+                    <input 
+                      type="radio" 
+                      name="decision" 
+                      value="FAILED"
+                      checked={resultDecision === 'FAILED'} 
+                      onChange={() => setResultDecision('FAILED')}
+                      className="accent-rose-600"
+                    />
+                    <div className="text-xs">
+                      <div className="text-rose-800">FAILED</div>
+                      <div className="text-[10px] text-rose-700 font-normal">Did not meet benchmark</div>
+                    </div>
+                  </label>
+                </div>
+              </div>
+
+              {/* Recruiter Notes / Feedback */}
+              <div>
+                <label className="block text-xs font-bold text-slate-800 mb-1">
+                  Recruiter Feedback / Notes (Sent to candidate)
+                </label>
+                <textarea
+                  rows="3"
+                  value={resultFeedback}
+                  onChange={(e) => setResultFeedback(e.target.value)}
+                  placeholder="e.g. You have cleared all coding test benchmarks and proctoring audits. Congratulations on advancing to the technical interview round!"
+                  className="w-full bg-slate-50 border border-slate-300 rounded-xl p-3 text-xs text-slate-900 outline-none focus:border-indigo-500 focus:bg-white transition"
+                />
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex items-center space-x-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setSelectedCandidateForResult(null)}
+                  className="flex-1 py-2.5 rounded-xl border border-slate-300 hover:bg-slate-50 text-xs font-bold text-slate-700 transition"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={sendingResult}
+                  className="flex-1 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-xs font-bold shadow-md shadow-indigo-500/25 transition flex items-center justify-center space-x-1.5"
+                >
+                  <Send className="w-3.5 h-3.5" />
+                  <span>{sendingResult ? 'Sending...' : 'Confirm & Release Result'}</span>
                 </button>
               </div>
             </form>

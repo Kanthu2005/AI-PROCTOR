@@ -20,7 +20,10 @@ export async function apiRequest<T = any>(endpoint: string, options: RequestOpti
   };
 
   // Support absolute root endpoints like /health as well as /api/v1 paths
-  const url = endpoint.startsWith('/health') ? endpoint : `${API_BASE}${endpoint}`;
+  const backendOrigin = ENV_API_BASE ? ENV_API_BASE.replace(/\/api\/v1\/?$/, '') : '';
+  const url = endpoint.startsWith('/health') 
+    ? (backendOrigin ? `${backendOrigin}${endpoint}` : endpoint) 
+    : `${API_BASE}${endpoint}`;
 
   const response = await fetch(url, {
     credentials: 'include',
@@ -164,6 +167,29 @@ export const api = {
     method: 'POST',
     body: JSON.stringify(data)
   }),
+  // Real Exam Invitation Email System
+  sendExamInvitations: (assessmentId: string, candidates: Array<{ email: string; full_name: string }>, expiresInHours = 72) => apiRequest(`/assessments/${assessmentId}/invitations`, {
+    method: 'POST',
+    body: JSON.stringify({ candidates, expires_in_hours: expiresInHours })
+  }),
+  previewExamInvitation: (assessmentId: string, sampleName?: string, sampleEmail?: string) => apiRequest(`/assessments/${assessmentId}/invitations/preview`, {
+    method: 'POST',
+    body: JSON.stringify({ sample_name: sampleName, sample_email: sampleEmail })
+  }),
+  listExamInvitations: (assessmentId: string, status?: string) => {
+    let url = `/assessments/${assessmentId}/invitations`;
+    if (status && status !== 'ALL') url += `?status=${encodeURIComponent(status)}`;
+    return apiRequest(url);
+  },
+  resendExamInvitation: (invitationId: string, expiresInHours = 72) => apiRequest(`/invitations/${invitationId}/resend?expires_in_hours=${expiresInHours}`, {
+    method: 'POST'
+  }),
+  remindExamInvitation: (invitationId: string) => apiRequest(`/invitations/${invitationId}/remind`, {
+    method: 'POST'
+  }),
+  validateExamInvitation: (token: string) => apiRequest(`/invitations/validate/${encodeURIComponent(token)}`),
+  getCandidateExamInvitations: () => apiRequest('/candidate/invitations'),
+
   revokeInvitation: (id: string) => apiRequest(`/candidates/invitations/${id}`, {
     method: 'DELETE'
   }),
@@ -199,6 +225,10 @@ export const api = {
     body: JSON.stringify({ final_answers: finalAnswers || [] })
   }),
   getAttemptResult: (attemptId: string) => apiRequest(`/attempts/${attemptId}/result`),
+  sendCandidateResult: (attemptId: string, decision: string, recruiterFeedback?: string) => apiRequest(`/attempts/${attemptId}/send-result`, {
+    method: 'POST',
+    body: JSON.stringify({ decision, recruiter_feedback: recruiterFeedback })
+  }),
 
   // AI Proctoring
   sendProctorEvent: (attemptId: string, eventData: Record<string, any>) => apiRequest(`/proctoring/attempts/${attemptId}/events`, {

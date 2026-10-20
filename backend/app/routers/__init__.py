@@ -11,6 +11,7 @@ from app.routers.ws import router as ws_router
 from app.routers.coding import router as coding_router
 from app.routers.health import router as health_router
 from app.routers.seb import router as seb_router
+from app.routers.invitations import router as invitations_router
 
 __all__ = [
     "auth_router",
@@ -18,6 +19,7 @@ __all__ = [
     "questions_router",
     "assessments_router",
     "candidates_router",
+    "invitations_router",
     "attempts_router",
     "proctoring_router",
     "sandbox_router",

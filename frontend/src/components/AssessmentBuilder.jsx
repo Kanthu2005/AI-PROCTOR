@@ -860,8 +860,11 @@ export default function AssessmentBuilder({ onOpenCandidateInvite, onLaunchCandi
                       className="bg-white border border-slate-300 text-xs text-slate-700 rounded-xl px-2 py-1.5 outline-none focus:border-blue-500"
                     >
                       <option value="ALL">All Types</option>
-                      <option value="MCQ_SINGLE">MCQ</option>
-                      <option value="CODING">Coding</option>
+                      <option value="MCQ_SINGLE">MCQ Single</option>
+                      <option value="MCQ_MULTIPLE">MCQ Multiple</option>
+                      <option value="TRUE_FALSE">True / False</option>
+                      <option value="DESCRIPTIVE">Descriptive</option>
+                      <option value="CODING">Python Coding</option>
                     </select>
                   </div>
 

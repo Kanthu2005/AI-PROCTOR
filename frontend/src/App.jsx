@@ -213,7 +213,10 @@ function MainApp() {
 
           {/* Candidate Management */}
           {activeTab === 'candidates' && (
-            <CandidateManagement onLaunchCandidateExam={(token) => handleLaunchCandidateWithToken(token)} />
+            <CandidateManagement 
+              onOpenCandidateInvite={(assessment) => setInvitingAssessment(assessment)}
+              onLaunchCandidateExam={(token) => handleLaunchCandidateWithToken(token)} 
+            />
           )}
 
           {/* Live Proctor Surveillance Console */}

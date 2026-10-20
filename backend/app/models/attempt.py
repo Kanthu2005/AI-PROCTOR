@@ -55,6 +55,12 @@ class Attempt(BaseModel):
     evaluation_status = Column(String(32), default="PENDING", nullable=False, index=True)
     section_scores = Column(JSON, default=dict, nullable=False)
 
+    # Individual result release & Recruiter decision
+    is_result_released = Column(Boolean, default=False, nullable=False)
+    result_released_at = Column(DateTime, nullable=True)
+    result_decision = Column(String(32), nullable=True)  # PASSED, FAILED, SHORTLISTED, REJECTED
+    recruiter_feedback = Column(Text, nullable=True)
+
     # Rankings & Percentiles
     rank = Column(Integer, nullable=True)
     percentile = Column(Float, nullable=True)
@@ -98,6 +104,7 @@ class AttemptAnswer(BaseModel):
     selected_option_ids = Column(JSON, default=list, nullable=False)
     text_response = Column(Text, nullable=True)
     code_response = Column(Text, nullable=True)
+    code_drafts = Column(JSON, default=dict, nullable=False)
     language = Column(String(50), nullable=True)
 
     is_correct = Column(Boolean, nullable=True)

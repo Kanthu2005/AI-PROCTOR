@@ -17,6 +17,12 @@ class AssessmentStatus(str, enum.Enum):
     CLOSED = "CLOSED"
 
 
+class ResultReleasePolicy(str, enum.Enum):
+    MANUAL = "MANUAL"
+    SCHEDULED = "SCHEDULED"
+    AFTER_REVIEW = "AFTER_REVIEW"
+
+
 class Assessment(BaseModel):
     __tablename__ = "assessments"
 
@@ -32,7 +38,14 @@ class Assessment(BaseModel):
     start_time = Column(DateTime, nullable=True)
     end_time = Column(DateTime, nullable=True)
     max_attempts = Column(Integer, default=1, nullable=False)
-    result_publication_policy = Column(String(50), default="IMMEDIATE", nullable=False)
+    
+    # Result Release & Post-Exam Confidentiality Policies
+    result_publication_policy = Column(String(50), default="IMMEDIATE", nullable=True)
+    result_release_policy = Column(Enum(ResultReleasePolicy), default=ResultReleasePolicy.MANUAL, nullable=False)
+    results_release_at = Column(DateTime, nullable=True)
+    is_results_released = Column(Boolean, default=False, nullable=False)
+    allow_candidate_answer_review = Column(Boolean, default=False, nullable=False)
+    
     is_active = Column(Boolean, default=True, nullable=False)
     created_by_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
 
@@ -41,6 +54,7 @@ class Assessment(BaseModel):
     rules = relationship("AssessmentRule", uselist=False, back_populates="assessment", cascade="all, delete-orphan")
     sections = relationship("Section", back_populates="assessment", cascade="all, delete-orphan", order_by="Section.order_index")
     invitations = relationship("CandidateInvitation", back_populates="assessment", cascade="all, delete-orphan")
+    exam_invitations = relationship("ExamInvitation", back_populates="assessment", cascade="all, delete-orphan")
     attempts = relationship("Attempt", back_populates="assessment", cascade="all, delete-orphan")
 
 
@@ -56,12 +70,21 @@ class AssessmentRule(BaseModel):
     negative_marking_formula = Column(String(255), default="(correct * positive_marks) - (wrong * negative_marks)", nullable=False)
     multiple_select_policy = Column(String(50), default="PARTIAL_WITH_PENALTY", nullable=False)  # PARTIAL_WITH_PENALTY, ALL_OR_NOTHING
     
-    # Proctoring Rules
+    # Proctoring & Integrity Rules
     full_screen_enforced = Column(Boolean, default=True, nullable=False)
     max_tab_switches_allowed = Column(Integer, default=3, nullable=False)
     webcam_proctoring_enabled = Column(Boolean, default=True, nullable=False)
+    mic_required = Column(Boolean, default=True, nullable=False)
     devtools_block_enabled = Column(Boolean, default=True, nullable=False)
     copy_paste_blocked = Column(Boolean, default=True, nullable=False)
+    record_tab_switches = Column(Boolean, default=True, nullable=False)
+    record_face_absence = Column(Boolean, default=True, nullable=False)
+    record_multiple_faces = Column(Boolean, default=True, nullable=False)
+    identity_match_enabled = Column(Boolean, default=True, nullable=False)
+    identity_match_threshold = Column(Float, default=0.70, nullable=False)
+    require_manual_approval = Column(Boolean, default=False, nullable=False)
+    warning_threshold = Column(Integer, default=3, nullable=False)
+    policy_version = Column(Integer, default=1, nullable=False)
 
     # Safe Exam Browser (SEB) High-Security Mode
     seb_required = Column(Boolean, default=False, nullable=False)
@@ -72,6 +95,19 @@ class AssessmentRule(BaseModel):
     seb_quit_password_hash = Column(String(128), nullable=True)
 
     assessment = relationship("Assessment", back_populates="rules")
+
+
+class AssessmentPolicyAudit(BaseModel):
+    __tablename__ = "assessment_policy_audits"
+
+    assessment_id = Column(String(36), ForeignKey("assessments.id", ondelete="CASCADE"), nullable=False, index=True)
+    changed_by_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    policy_version = Column(Integer, default=1, nullable=False)
+    previous_rules = Column(JSON, default=dict, nullable=False)
+    new_rules = Column(JSON, default=dict, nullable=False)
+
+    assessment = relationship("Assessment")
+    changed_by = relationship("User")
 
 
 class Section(BaseModel):

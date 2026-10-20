@@ -207,12 +207,26 @@ export default function CandidatePortal({ onLaunchCandidateExam }) {
                       <div className="pt-2 border-t border-slate-100 flex items-center justify-between">
                         {isCompleted ? (
                           <div className="flex items-center space-x-3 text-xs">
-                            <span className="font-bold text-slate-700">
-                              Result: {inv.total_score !== null ? `${inv.total_score} / 100` : 'Evaluated'}
-                            </span>
-                            <span className="text-emerald-600 font-bold">
-                              {inv.is_passed ? '✓ PASSED' : 'COMPLETED'}
-                            </span>
+                            {inv.is_result_released ? (
+                              <>
+                                <span className="font-bold text-slate-700">
+                                  Result: {inv.total_score !== null ? `${inv.total_score} / 100` : 'Evaluated'}
+                                </span>
+                                <span className={`font-bold ${inv.is_passed ? 'text-emerald-600' : 'text-slate-600'}`}>
+                                  {inv.result_decision ? `✓ ${inv.result_decision}` : (inv.is_passed ? '✓ PASSED' : 'COMPLETED')}
+                                </span>
+                              </>
+                            ) : (
+                              <div className="flex items-center space-x-2 text-slate-500">
+                                <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span>
+                                <span className="font-semibold text-[11px] text-amber-700 bg-amber-50 px-2.5 py-0.5 rounded-full border border-amber-200">
+                                  Under Recruiter Review
+                                </span>
+                                <span className="text-[11px] text-slate-400 hidden sm:inline">
+                                  Results sent individually
+                                </span>
+                              </div>
+                            )}
                           </div>
                         ) : (
                           <div className="text-[11px] text-slate-500 font-normal">
@@ -229,7 +243,7 @@ export default function CandidatePortal({ onLaunchCandidateExam }) {
                           }`}
                         >
                           <Play className="w-3.5 h-3.5 fill-current" />
-                          <span>{isCompleted ? 'Review Result' : isInProgress ? 'Resume Test' : 'Start Assessment'}</span>
+                          <span>{isCompleted ? (inv.is_result_released ? 'View Result' : 'View Receipt') : isInProgress ? 'Resume Test' : 'Start Assessment'}</span>
                         </button>
                       </div>
                     </div>

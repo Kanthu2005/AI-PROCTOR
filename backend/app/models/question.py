@@ -63,6 +63,7 @@ class QuestionVersion(BaseModel):
     options = Column(JSON, default=list, nullable=False)  # [{id, text, is_correct, explanation}]
     coding_details = Column(JSON, default=dict, nullable=False)  # {starter_code, language, test_cases}
     sql_details = Column(JSON, default=dict, nullable=False)  # {schema_sql, solution_sql, test_queries}
+    descriptive_details = Column(JSON, default=dict, nullable=False)  # {evaluation_criteria, expected_answer, min_words, max_words}
     
     review_status = Column(Enum(ReviewStatus), default=ReviewStatus.APPROVED, nullable=False, index=True)
     is_published = Column(Boolean, default=True, nullable=False)

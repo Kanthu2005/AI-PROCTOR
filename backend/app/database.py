@@ -8,8 +8,11 @@ logger = logging.getLogger("proctorai.database")
 def resolve_database_url(url: str) -> str:
     """
     Ensure PostgreSQL URLs use an installed DBAPI driver (psycopg or psycopg2).
-    If url starts with 'postgresql://', detects which driver is available.
+    Also normalizes legacy 'postgres://' URLs (provided by Render/Heroku) to 'postgresql://'.
     """
+    if url.startswith("postgres://"):
+        url = url.replace("postgres://", "postgresql://", 1)
+
     if url.startswith("postgresql://"):
         try:
             import psycopg  # noqa: F401
@@ -21,6 +24,7 @@ def resolve_database_url(url: str) -> str:
             except ImportError:
                 return url
     return url
+
 
 
 # SQLAlchemy setup
@@ -85,28 +89,3 @@ def check_db_connection() -> dict:
         }
 
 
-# MongoDB / Telemetry Store setup
-# Fallback to mongomock when no live MongoDB daemon is running
-_mongo_client = None
-_mongo_db = None
-
-
-def get_mongo_db():
-    global _mongo_client, _mongo_db
-    if _mongo_db is not None:
-        return _mongo_db
-
-    try:
-        import pymongo
-        client = pymongo.MongoClient(settings.MONGODB_URL, serverSelectionTimeoutMS=1000)
-        client.server_info()
-        _mongo_client = client
-        _mongo_db = client[settings.MONGODB_DB_NAME]
-        logger.info("Connected to MongoDB for high-volume telemetry & proctoring logs.")
-    except Exception as e:
-        logger.warning(f"MongoDB not reachable ({e}). Falling back to in-memory mongomock for telemetry.")
-        import mongomock
-        _mongo_client = mongomock.MongoClient()
-        _mongo_db = _mongo_client[settings.MONGODB_DB_NAME]
-
-    return _mongo_db

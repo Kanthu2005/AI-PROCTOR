@@ -1,4 +1,6 @@
+from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional
+from pydantic import BaseModel
 from fastapi import APIRouter, Depends, HTTPException, status, Request, Header
 from sqlalchemy.orm import Session
 from app.database import get_db
@@ -147,19 +149,14 @@ def submit_attempt(
         "status": attempt.status.value,
         "submission_receipt": attempt.submission_receipt,
         "submission_type": attempt.submission_type or "MANUAL",
-        "total_score": attempt.total_score,
-        "total_max_marks": attempt.total_max_marks,
-        "percentage": attempt.percentage,
-        "is_passed": attempt.is_passed,
-        "rank": attempt.rank,
-        "percentile": attempt.percentile,
-        "risk_score": attempt.risk_score,
-        "risk_level": attempt.risk_level.value,
         "submitted_at": attempt.submitted_at,
         "total_questions": total_q,
         "answered_count": answered_count,
         "unanswered_count": unanswered_count,
-        "flagged_count": flagged_count
+        "flagged_count": flagged_count,
+        "is_result_released": False,
+        "results_policy": "RECRUITER_INDIVIDUAL_REVIEW",
+        "message": "Your examination has been securely finalized and recorded in the ProctorAI database. Evaluation and integrity checks are under recruiter review."
     }
 
 
@@ -172,17 +169,39 @@ def get_attempt_result(
     if not attempt:
         raise HTTPException(status_code=404, detail="Attempt not found")
 
+    is_released = bool(
+        getattr(attempt, 'is_result_released', False) or
+        (attempt.assessment and getattr(attempt.assessment, 'is_results_released', False))
+    )
+
+    if not is_released:
+        # Candidate receipt view: scores and pass/fail strictly withheld until recruiter sends/releases
+        return {
+            "attempt_id": attempt.id,
+            "assessment_id": attempt.assessment_id,
+            "candidate_name": attempt.candidate_name,
+            "candidate_email": attempt.candidate_email,
+            "status": attempt.status.value,
+            "submission_receipt": attempt.submission_receipt,
+            "submission_type": attempt.submission_type or "MANUAL",
+            "submitted_at": attempt.submitted_at,
+            "is_result_released": False,
+            "result_decision": "PENDING_REVIEW",
+            "message": "Examination finalized. Performance evaluation and proctoring telemetry are currently under recruiter review."
+        }
+
     section_breakdown = []
-    answers = attempt.answers
-    for ans in answers:
-        section_breakdown.append({
-            "question_id": ans.question_id,
-            "section_id": ans.section_id,
-            "marks_awarded": ans.marks_awarded,
-            "is_correct": ans.is_correct,
-            "time_spent_seconds": ans.time_spent_seconds,
-            "is_flagged_for_review": ans.is_flagged_for_review
-        })
+    if getattr(attempt.assessment, 'allow_candidate_answer_review', False):
+        answers = attempt.answers
+        for ans in answers:
+            section_breakdown.append({
+                "question_id": ans.question_id,
+                "section_id": ans.section_id,
+                "marks_awarded": ans.marks_awarded,
+                "is_correct": ans.is_correct,
+                "time_spent_seconds": ans.time_spent_seconds,
+                "is_flagged_for_review": ans.is_flagged_for_review
+            })
 
     return {
         "attempt_id": attempt.id,
@@ -195,16 +214,75 @@ def get_attempt_result(
         "total_score": attempt.total_score,
         "total_max_marks": attempt.total_max_marks,
         "percentage": attempt.percentage,
-        "is_passed": attempt.is_passed,
+        "is_passed": (attempt.result_decision == "PASSED") if getattr(attempt, 'result_decision', None) else attempt.is_passed,
+        "is_result_released": True,
+        "result_decision": getattr(attempt, 'result_decision', None) or ("PASSED" if attempt.is_passed else "COMPLETED"),
+        "result_released_at": attempt.result_released_at.isoformat() if attempt.result_released_at else None,
+        "recruiter_feedback": getattr(attempt, 'recruiter_feedback', None),
         "rank": attempt.rank,
         "percentile": attempt.percentile,
-        "risk_score": attempt.risk_score,
         "risk_level": attempt.risk_level.value,
-        "human_review_status": attempt.human_review_status.value,
-        "evaluation_status": getattr(attempt, 'evaluation_status', 'FULLY_EVALUATED'),
-        "section_scores": attempt.section_scores or {},
         "submitted_at": attempt.submitted_at,
         "section_breakdown": section_breakdown
+    }
+
+
+class SendCandidateResultRequest(BaseModel):
+    decision: str  # "PASSED", "FAILED", "SHORTLISTED", "REJECTED"
+    recruiter_feedback: Optional[str] = None
+    notify_candidate: bool = True
+
+
+@router.post("/{attempt_id}/send-result", response_model=Dict[str, Any])
+def send_candidate_result(
+    attempt_id: str,
+    payload: SendCandidateResultRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles(Role.RECRUITER, Role.ORG_ADMIN, Role.PLATFORM_ADMIN))
+):
+    """
+    Recruiter sends individual candidate assessment result:
+    - Authoritative recruiter decision (PASSED, FAILED, SHORTLISTED, REJECTED)
+    - Optional qualitative recruiter feedback
+    - Sets attempt.is_result_released = True and timestamps
+    - Unlocks result on candidate portal with verified evaluation
+    """
+    attempt = db.query(Attempt).filter(Attempt.id == attempt_id).first()
+    if not attempt:
+        raise HTTPException(status_code=404, detail="Attempt not found")
+    verify_tenant_access(attempt.assessment.org_id, current_user, db)
+
+    decision_norm = payload.decision.strip().upper()
+    valid_decisions = {"PASSED", "FAILED", "SHORTLISTED", "REJECTED"}
+    if decision_norm not in valid_decisions:
+        raise HTTPException(status_code=400, detail=f"Invalid decision. Must be one of: {', '.join(valid_decisions)}")
+
+    attempt.is_result_released = True
+    attempt.result_released_at = datetime.now(timezone.utc)
+    attempt.result_decision = decision_norm
+    attempt.recruiter_feedback = payload.recruiter_feedback
+    if decision_norm in {"PASSED", "SHORTLISTED"}:
+        attempt.is_passed = True
+    elif decision_norm in {"FAILED", "REJECTED"}:
+        attempt.is_passed = False
+
+    db.commit()
+    db.refresh(attempt)
+
+    return {
+        "attempt_id": attempt.id,
+        "candidate_name": attempt.candidate_name,
+        "candidate_email": attempt.candidate_email,
+        "status": attempt.status.value,
+        "is_result_released": attempt.is_result_released,
+        "result_decision": attempt.result_decision,
+        "recruiter_feedback": attempt.recruiter_feedback,
+        "result_released_at": attempt.result_released_at.isoformat() if attempt.result_released_at else None,
+        "total_score": attempt.total_score,
+        "total_max_marks": attempt.total_max_marks,
+        "percentage": attempt.percentage,
+        "is_passed": attempt.is_passed,
+        "message": f"Candidate result ({attempt.result_decision}) successfully finalized and sent by recruiter."
     }
 
 

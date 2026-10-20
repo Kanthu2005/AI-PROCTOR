@@ -5,12 +5,26 @@ from app.models.base import BaseModel
 
 
 class Role(str, enum.Enum):
+    ADMIN_RECRUITER = "ADMIN_RECRUITER"
+    CANDIDATE = "CANDIDATE"
     PLATFORM_ADMIN = "PLATFORM_ADMIN"
+    
+    # Backwards-compatible legacy roles mapped into ADMIN_RECRUITER
     ORG_ADMIN = "ORG_ADMIN"
     RECRUITER = "RECRUITER"
     QUESTION_AUTHOR = "QUESTION_AUTHOR"
-    CANDIDATE = "CANDIDATE"
     PROCTOR = "PROCTOR"
+
+    @classmethod
+    def normalize(cls, role_val: str) -> "Role":
+        if isinstance(role_val, cls):
+            return role_val
+        val = str(role_val).upper()
+        if val in ("RECRUITER", "ORG_ADMIN", "QUESTION_AUTHOR", "PROCTOR", "ADMIN_RECRUITER"):
+            return cls.ADMIN_RECRUITER
+        if val == "PLATFORM_ADMIN":
+            return cls.PLATFORM_ADMIN
+        return cls.CANDIDATE
 
 
 class Organization(BaseModel):

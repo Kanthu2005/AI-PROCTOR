@@ -12,16 +12,32 @@ class OptionSchema(BaseModel):
 
 
 class TestCaseSchema(BaseModel):
-    input: str
+    id: Optional[str] = None
+    label: Optional[str] = "Test Case"
+    input: str = ""
     expected_output: str
     is_hidden: bool = False
-    time_limit_ms: int = 2000
+    enabled: bool = True
+    notes: Optional[str] = None
+    time_limit_ms: int = 3000
     memory_limit_mb: int = 128
 
 
 class CodingDetailsSchema(BaseModel):
-    starter_code: str = ""
-    language: str = "python"
+    allowed_languages: List[str] = ["python"]
+    default_language: str = "python"
+    starter_codes: Dict[str, str] = Field(default_factory=dict)
+    language_instructions: Dict[str, str] = Field(default_factory=dict)
+    input_format: Optional[str] = None
+    output_format: Optional[str] = None
+    constraints: Optional[str] = None
+    examples: Optional[str] = None
+    time_limit_seconds: int = 3
+    memory_limit_mb: int = 128
+    
+    # Backwards compatibility fields
+    starter_code: Optional[str] = ""
+    language: Optional[str] = "python"
     test_cases: List[TestCaseSchema] = []
 
 
@@ -29,6 +45,14 @@ class SQLDetailsSchema(BaseModel):
     schema_sql: str = ""
     solution_sql: str = ""
     test_queries: List[str] = []
+
+
+class DescriptiveDetailsSchema(BaseModel):
+    evaluation_criteria: Optional[str] = ""
+    expected_answer: Optional[str] = ""
+    min_words: Optional[int] = 0
+    max_words: Optional[int] = 1000
+    rubric: Optional[Dict[str, Any]] = None
 
 
 class QuestionCreate(BaseModel):
@@ -45,6 +69,7 @@ class QuestionCreate(BaseModel):
     options: List[OptionSchema] = []
     coding_details: Optional[CodingDetailsSchema] = None
     sql_details: Optional[SQLDetailsSchema] = None
+    descriptive_details: Optional[DescriptiveDetailsSchema] = None
     review_status: ReviewStatus = ReviewStatus.DRAFT
     is_published: bool = True
 
@@ -63,13 +88,13 @@ class QuestionCreate(BaseModel):
                 if correct_count < 1:
                     raise ValueError("MCQ_MULTIPLE must have at least 1 correct option")
         elif q_type == QuestionType.TRUE_FALSE:
-            if not self.options or len(self.options) != 2:
-                # Auto-create True/False options if empty
-                if not self.options:
-                    self.options = [
-                        OptionSchema(id="true", text="True", is_correct=True),
-                        OptionSchema(id="false", text="False", is_correct=False)
-                    ]
+            if not self.options:
+                self.options = [
+                    OptionSchema(id="true", text="True", is_correct=True),
+                    OptionSchema(id="false", text="False", is_correct=False)
+                ]
+            if len(self.options) != 2:
+                raise ValueError("TRUE_FALSE question must have exactly 2 options (True and False)")
             correct_count = sum(1 for o in self.options if o.is_correct)
             if correct_count != 1:
                 raise ValueError("TRUE_FALSE question must have exactly 1 correct answer (True or False)")
@@ -78,9 +103,17 @@ class QuestionCreate(BaseModel):
                 correct_count = sum(1 for o in self.options if o.is_correct)
                 if correct_count < 1 and not self.explanation:
                     raise ValueError("FILL_IN_BLANK must have at least 1 accepted answer or explanation")
+        elif q_type == QuestionType.DESCRIPTIVE:
+            if not self.descriptive_details:
+                self.descriptive_details = DescriptiveDetailsSchema()
         elif q_type == QuestionType.CODING:
             if not self.coding_details:
-                self.coding_details = CodingDetailsSchema()
+                raise ValueError("CODING questions require coding_details with test cases")
+            if not self.coding_details.test_cases:
+                raise ValueError("Python CODING questions must have at least 1 test case")
+            for idx, tc in enumerate(self.coding_details.test_cases):
+                if tc.expected_output is None or str(tc.expected_output).strip() == "":
+                    raise ValueError(f"Test case #{idx + 1} must have a non-empty expected_output")
         elif q_type == QuestionType.SQL:
             if not self.sql_details:
                 self.sql_details = SQLDetailsSchema()
@@ -99,6 +132,7 @@ class QuestionUpdate(BaseModel):
     options: Optional[List[OptionSchema]] = None
     coding_details: Optional[CodingDetailsSchema] = None
     sql_details: Optional[SQLDetailsSchema] = None
+    descriptive_details: Optional[DescriptiveDetailsSchema] = None
     review_status: Optional[ReviewStatus] = None
     is_published: Optional[bool] = None
 
@@ -124,6 +158,7 @@ class QuestionVersionResponse(BaseModel):
     options: List[Dict[str, Any]]
     coding_details: Dict[str, Any]
     sql_details: Dict[str, Any]
+    descriptive_details: Dict[str, Any] = Field(default_factory=dict)
     review_status: ReviewStatus = ReviewStatus.APPROVED
     is_published: bool
     created_at: datetime

@@ -55,6 +55,7 @@ export default function QuestionBankManager() {
   const [historyVersions, setHistoryVersions] = useState([]);
 
   // Form Fields
+  const [formError, setFormError] = useState(null);
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [questionType, setQuestionType] = useState('MCQ_SINGLE');
@@ -66,10 +67,12 @@ export default function QuestionBankManager() {
   const [reviewStatus, setReviewStatus] = useState('APPROVED');
   const [explanation, setExplanation] = useState('');
 
-  // Options for MCQ / True-False / Fill-in-the-blank
+  // Options for MCQ / True-False
   const [options, setOptions] = useState([
     { id: 'opt_1', text: 'Option A', is_correct: true },
-    { id: 'opt_2', text: 'Option B', is_correct: false }
+    { id: 'opt_2', text: 'Option B', is_correct: false },
+    { id: 'opt_3', text: 'Option C', is_correct: false },
+    { id: 'opt_4', text: 'Option D', is_correct: false }
   ]);
 
   // Coding Question Fields
@@ -83,6 +86,35 @@ export default function QuestionBankManager() {
   const [schemaSql, setSchemaSql] = useState('CREATE TABLE employees (\n  id INT PRIMARY KEY,\n  name VARCHAR(50),\n  salary INT\n);');
   const [solutionSql, setSolutionSql] = useState('SELECT name, salary FROM employees WHERE salary > 50000;');
   const [testQueries, setTestQueries] = useState('SELECT name, salary FROM employees WHERE salary > 50000;');
+
+  // Descriptive Question Fields
+  const [evaluationCriteria, setEvaluationCriteria] = useState('');
+  const [expectedAnswer, setExpectedAnswer] = useState('');
+  const [minWords, setMinWords] = useState(0);
+  const [maxWords, setMaxWords] = useState(500);
+
+  const handleQuestionTypeChange = (newType) => {
+    setQuestionType(newType);
+    setFormError(null);
+    if (newType === 'TRUE_FALSE') {
+      if (!options || options.length !== 2 || options[0].text !== 'True') {
+        setOptions([
+          { id: 'opt_true', text: 'True', is_correct: true },
+          { id: 'opt_false', text: 'False', is_correct: false }
+        ]);
+      }
+    } else if ((newType === 'MCQ_SINGLE' || newType === 'MCQ_MULTIPLE') && options.length < 2) {
+      setOptions([
+        { id: 'opt_1', text: 'Option A', is_correct: true },
+        { id: 'opt_2', text: 'Option B', is_correct: false },
+        { id: 'opt_3', text: 'Option C', is_correct: false },
+        { id: 'opt_4', text: 'Option D', is_correct: false }
+      ]);
+    } else if (newType === 'DESCRIPTIVE') {
+      setPositiveMarks(5.0);
+      setNegativeMarks(0.0);
+    }
+  };
 
   useEffect(() => {
     loadQuestions();
@@ -119,6 +151,7 @@ export default function QuestionBankManager() {
   };
 
   const handleOpenCreate = () => {
+    setFormError(null);
     setEditingQuestionId(null);
     setTitle('');
     setDescription('');
@@ -136,17 +169,22 @@ export default function QuestionBankManager() {
       { id: 'opt_3', text: 'Option C', is_correct: false },
       { id: 'opt_4', text: 'Option D', is_correct: false }
     ]);
-    setStarterCode('def solve():\n    pass\n');
+    setStarterCode('def solve():\n    # Read input and solve\n    pass\n');
     setCodingTestCases([
       { input: '1 2\n', expected_output: '3', is_hidden: false }
     ]);
-    setSchemaSql('CREATE TABLE records (id INT, value VARCHAR(50));');
-    setSolutionSql('SELECT * FROM records;');
-    setTestQueries('SELECT * FROM records;');
+    setSchemaSql('');
+    setSolutionSql('');
+    setTestQueries('');
+    setEvaluationCriteria('Technical correctness (40%), Completeness (40%), Clarity (20%)');
+    setExpectedAnswer('');
+    setMinWords(0);
+    setMaxWords(500);
     setShowFormModal(true);
   };
 
   const handleOpenEdit = (q) => {
+    setFormError(null);
     const cv = q.current_version || {};
     setEditingQuestionId(q.id);
     setTitle(cv.title || '');
@@ -174,10 +212,16 @@ export default function QuestionBankManager() {
       setCodingTestCases(cv.coding_details.test_cases || []);
     }
 
-    if (cv.sql_details) {
-      setSchemaSql(cv.sql_details.schema_sql || '');
-      setSolutionSql(cv.sql_details.solution_sql || '');
-      setTestQueries(Array.isArray(cv.sql_details.test_queries) ? cv.sql_details.test_queries.join('\n') : '');
+    if (cv.descriptive_details) {
+      setEvaluationCriteria(cv.descriptive_details.evaluation_criteria || '');
+      setExpectedAnswer(cv.descriptive_details.expected_answer || '');
+      setMinWords(cv.descriptive_details.min_words || 0);
+      setMaxWords(cv.descriptive_details.max_words || 500);
+    } else {
+      setEvaluationCriteria('');
+      setExpectedAnswer('');
+      setMinWords(0);
+      setMaxWords(500);
     }
 
     setShowFormModal(true);
@@ -204,24 +248,95 @@ export default function QuestionBankManager() {
 
   const handleSaveQuestion = async (e) => {
     e.preventDefault();
+    setFormError(null);
+
+    // Client-side validations
+    if (!title.trim()) {
+      setFormError('Question Title is required.');
+      return;
+    }
+
+    const posMarks = parseFloat(positiveMarks);
+    if (isNaN(posMarks) || posMarks <= 0) {
+      setFormError('Positive Marks must be greater than 0.');
+      return;
+    }
+
+    if (questionType === 'MCQ_SINGLE') {
+      if (options.length < 2) {
+        setFormError('Single-choice MCQ must have at least 2 options.');
+        return;
+      }
+      for (let i = 0; i < options.length; i++) {
+        if (!options[i].text.trim()) {
+          setFormError(`Option ${i + 1} text cannot be empty.`);
+          return;
+        }
+      }
+      const correctCount = options.filter(o => o.is_correct).length;
+      if (correctCount !== 1) {
+        setFormError(`Single-choice MCQ must have exactly 1 correct option selected (currently ${correctCount} selected).`);
+        return;
+      }
+    } else if (questionType === 'MCQ_MULTIPLE') {
+      if (options.length < 2) {
+        setFormError('Multiple-select MCQ must have at least 2 options.');
+        return;
+      }
+      for (let i = 0; i < options.length; i++) {
+        if (!options[i].text.trim()) {
+          setFormError(`Option ${i + 1} text cannot be empty.`);
+          return;
+        }
+      }
+      const correctCount = options.filter(o => o.is_correct).length;
+      if (correctCount < 1) {
+        setFormError('Multiple-select MCQ must have at least 1 correct option selected.');
+        return;
+      }
+    } else if (questionType === 'TRUE_FALSE') {
+      const correctCount = options.filter(o => o.is_correct).length;
+      if (correctCount !== 1) {
+        setFormError('Please select whether True or False is the correct answer.');
+        return;
+      }
+    } else if (questionType === 'CODING') {
+      if (!starterCode.trim()) {
+        setFormError('Python starter code is required.');
+        return;
+      }
+      if (!codingTestCases || codingTestCases.length < 1) {
+        setFormError('Python coding question must have at least 1 test case.');
+        return;
+      }
+      for (let i = 0; i < codingTestCases.length; i++) {
+        if (codingTestCases[i].expected_output === undefined || codingTestCases[i].expected_output.trim() === '') {
+          setFormError(`Test Case #${i + 1} must have a non-empty expected output.`);
+          return;
+        }
+      }
+    } else if (questionType === 'DESCRIPTIVE') {
+      if (!description.trim() && !evaluationCriteria.trim()) {
+        setFormError('Descriptive questions require either a problem statement or evaluation rubric.');
+        return;
+      }
+    } else if (questionType === 'SQL') {
+      setFormError('SQL coding questions are currently unsupported until a secure isolated runner is configured.');
+      return;
+    }
+
     try {
       setLoading(true);
       const orgId = user?.org_id || 'test_org';
       const parsedTags = tags.split(',').map(t => t.trim()).filter(Boolean);
 
-      let payloadOptions = [];
+      let payloadOptions = undefined;
       if (questionType === 'MCQ_SINGLE' || questionType === 'MCQ_MULTIPLE' || questionType === 'TRUE_FALSE') {
         payloadOptions = options.map((opt, idx) => ({
           id: opt.id || `opt_${idx + 1}`,
-          text: opt.text,
+          text: opt.text.trim(),
           is_correct: Boolean(opt.is_correct),
           explanation: opt.explanation || undefined
-        }));
-      } else if (questionType === 'FILL_IN_BLANK') {
-        payloadOptions = options.map((opt, idx) => ({
-          id: opt.id || `fib_${idx + 1}`,
-          text: opt.text,
-          is_correct: true
         }));
       }
 
@@ -229,18 +344,19 @@ export default function QuestionBankManager() {
         language: 'python',
         starter_code: starterCode,
         test_cases: codingTestCases.map(tc => ({
-          input: tc.input,
-          expected_output: tc.expected_output,
+          input: tc.input || '',
+          expected_output: tc.expected_output.trim(),
           is_hidden: Boolean(tc.is_hidden),
           time_limit_ms: 2000,
           memory_limit_mb: 128
         }))
       } : undefined;
 
-      const sqlDetailsPayload = questionType === 'SQL' ? {
-        schema_sql: schemaSql,
-        solution_sql: solutionSql,
-        test_queries: testQueries.split('\n').filter(Boolean)
+      const descriptiveDetailsPayload = questionType === 'DESCRIPTIVE' ? {
+        evaluation_criteria: evaluationCriteria,
+        expected_answer: expectedAnswer,
+        min_words: parseInt(minWords, 10) || 0,
+        max_words: parseInt(maxWords, 10) || 1000
       } : undefined;
 
       if (editingQuestionId) {
@@ -251,19 +367,18 @@ export default function QuestionBankManager() {
           difficulty,
           topic,
           default_positive_marks: parseFloat(positiveMarks) || 1.0,
-          default_negative_marks: parseFloat(negativeMarks) || 0.0,
+          default_negative_marks: questionType === 'DESCRIPTIVE' ? 0.0 : (parseFloat(negativeMarks) || 0.0),
           tags: parsedTags,
           explanation: explanation || undefined,
           options: payloadOptions,
           coding_details: codingDetailsPayload,
-          sql_details: sqlDetailsPayload,
+          descriptive_details: descriptiveDetailsPayload,
           review_status: reviewStatus,
           is_published: true
         };
-        const updatedVersion = await api.updateQuestion(editingQuestionId, updatePayload);
+        await api.updateQuestion(editingQuestionId, updatePayload);
         setShowFormModal(false);
         loadQuestions();
-        alert(`Question updated! Created immutable Version ${updatedVersion.version_number}.`);
       } else {
         // CREATE Question + Version 1
         const createPayload = {
@@ -274,22 +389,21 @@ export default function QuestionBankManager() {
           difficulty,
           topic,
           default_positive_marks: parseFloat(positiveMarks) || 1.0,
-          default_negative_marks: parseFloat(negativeMarks) || 0.0,
+          default_negative_marks: questionType === 'DESCRIPTIVE' ? 0.0 : (parseFloat(negativeMarks) || 0.0),
           tags: parsedTags,
           explanation: explanation || undefined,
-          options: payloadOptions,
+          options: payloadOptions || [],
           coding_details: codingDetailsPayload,
-          sql_details: sqlDetailsPayload,
+          descriptive_details: descriptiveDetailsPayload,
           review_status: reviewStatus,
           is_published: true
         };
         await api.createQuestion(createPayload);
         setShowFormModal(false);
         loadQuestions();
-        alert('New question created and persisted to Question Bank!');
       }
     } catch (err) {
-      alert(`Save failed: ${err.message}`);
+      setFormError(err.message || 'Save failed. Please check form inputs.');
     } finally {
       setLoading(false);
     }
@@ -386,10 +500,8 @@ export default function QuestionBankManager() {
               <option value="MCQ_SINGLE">MCQ Single</option>
               <option value="MCQ_MULTIPLE">MCQ Multiple</option>
               <option value="TRUE_FALSE">True / False</option>
-              <option value="FILL_IN_BLANK">Fill in Blank</option>
               <option value="DESCRIPTIVE">Descriptive</option>
               <option value="CODING">Python Coding</option>
-              <option value="SQL">SQL Query</option>
             </select>
 
             <select
@@ -594,6 +706,13 @@ export default function QuestionBankManager() {
             </div>
 
             <form onSubmit={handleSaveQuestion} className="space-y-4">
+              {formError && (
+                <div className="p-3.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs font-semibold flex items-center space-x-2">
+                  <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" />
+                  <span>{formError}</span>
+                </div>
+              )}
+
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div className="sm:col-span-2">
                   <label className="block text-xs font-bold text-slate-700 mb-1">Question Title *</label>
@@ -608,13 +727,23 @@ export default function QuestionBankManager() {
                 </div>
 
                 <div className="sm:col-span-2">
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Problem Statement / Description</label>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    {questionType === 'CODING' 
+                      ? 'Problem Statement & Constraints *' 
+                      : (questionType === 'DESCRIPTIVE' ? 'Descriptive Prompt / Essay Topic *' : 'Problem Statement / Description')}
+                  </label>
                   <textarea
                     rows={3}
                     value={description}
                     onChange={(e) => setDescription(e.target.value)}
-                    placeholder="Detailed question instructions, background, or code snippet..."
-                    className="w-full bg-slate-50 border border-slate-300 rounded-xl p-3 text-xs text-slate-900 outline-none focus:border-blue-500"
+                    placeholder={
+                      questionType === 'CODING'
+                        ? 'Describe the algorithmic problem, input/output specifications, time complexity expectations, and edge-case constraints...'
+                        : (questionType === 'DESCRIPTIVE'
+                          ? 'Provide instructions or prompt for the candidate response...'
+                          : 'Question details, background, or code snippet...')
+                    }
+                    className="w-full bg-slate-50 border border-slate-300 rounded-xl p-3 text-xs text-slate-900 outline-none focus:border-blue-500 font-sans"
                   />
                 </div>
 
@@ -623,16 +752,15 @@ export default function QuestionBankManager() {
                   <select
                     value={questionType}
                     disabled={Boolean(editingQuestionId)}
-                    onChange={(e) => setQuestionType(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-900 disabled:opacity-60"
+                    onChange={(e) => handleQuestionTypeChange(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-900 disabled:opacity-60 cursor-pointer"
                   >
                     <option value="MCQ_SINGLE">Single-Answer MCQ</option>
                     <option value="MCQ_MULTIPLE">Multiple-Select MCQ</option>
                     <option value="TRUE_FALSE">True / False</option>
-                    <option value="FILL_IN_BLANK">Fill in the Blank</option>
-                    <option value="DESCRIPTIVE">Descriptive / Subjective</option>
+                    <option value="DESCRIPTIVE">Descriptive Answer</option>
                     <option value="CODING">Python Coding</option>
-                    <option value="SQL">SQL Coding</option>
+                    <option value="SQL" disabled>SQL Coding (Unsupported - No Sandbox Runner)</option>
                   </select>
                 </div>
 
@@ -641,7 +769,7 @@ export default function QuestionBankManager() {
                   <select
                     value={difficulty}
                     onChange={(e) => setDifficulty(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-900"
+                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-900 cursor-pointer"
                   >
                     <option value="EASY">Easy</option>
                     <option value="MEDIUM">Medium</option>
@@ -655,7 +783,7 @@ export default function QuestionBankManager() {
                     type="text"
                     value={topic}
                     onChange={(e) => setTopic(e.target.value)}
-                    placeholder="e.g. Data Structures, SQL, Python"
+                    placeholder="e.g. Data Structures, Python, Computer Networks"
                     className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-900"
                   />
                 </div>
@@ -665,7 +793,7 @@ export default function QuestionBankManager() {
                   <select
                     value={reviewStatus}
                     onChange={(e) => setReviewStatus(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-900"
+                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-900 cursor-pointer"
                   >
                     <option value="APPROVED">Approved</option>
                     <option value="IN_REVIEW">In Review</option>
@@ -679,60 +807,124 @@ export default function QuestionBankManager() {
                   <input
                     type="number"
                     step="0.5"
-                    min="0"
+                    min="0.5"
                     value={positiveMarks}
                     onChange={(e) => setPositiveMarks(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-900"
+                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-900 font-mono"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Negative Marks</label>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Negative Marks {questionType === 'DESCRIPTIVE' && <span className="text-[10px] text-slate-400 font-normal">(Disabled)</span>}
+                  </label>
                   <input
                     type="number"
                     step="0.25"
                     min="0"
-                    value={negativeMarks}
+                    disabled={questionType === 'DESCRIPTIVE'}
+                    value={questionType === 'DESCRIPTIVE' ? 0.0 : negativeMarks}
                     onChange={(e) => setNegativeMarks(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-900"
+                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-900 font-mono disabled:opacity-50 disabled:bg-slate-100"
                   />
                 </div>
               </div>
 
-              {/* Type-Specific Editors */}
-              {/* 1. MCQ Single / Multiple / True-False */}
-              {(questionType === 'MCQ_SINGLE' || questionType === 'MCQ_MULTIPLE' || questionType === 'TRUE_FALSE') && (
-                <div className="space-y-2 p-3.5 bg-slate-50 border border-slate-200 rounded-2xl">
+              {/* Type-Specific Field Editors */}
+              {/* 1. Single-Answer MCQ */}
+              {questionType === 'MCQ_SINGLE' && (
+                <div className="space-y-3 p-3.5 bg-slate-50 border border-slate-200 rounded-2xl">
                   <div className="flex items-center justify-between">
-                    <label className="text-xs font-bold text-slate-800">
-                      Answer Options (Select correct answer)
-                    </label>
-                    {questionType !== 'TRUE_FALSE' && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const n = options.length + 1;
-                          setOptions([...options, { id: `opt_${n}`, text: `Option ${n}`, is_correct: false }]);
-                        }}
-                        className="text-[11px] font-bold text-blue-600 hover:text-blue-800"
-                      >
-                        + Add Choice
-                      </button>
-                    )}
+                    <div>
+                      <label className="text-xs font-bold text-slate-800 block">
+                        Single-Choice Options (Select exactly 1 correct answer)
+                      </label>
+                      <span className="text-[11px] text-slate-500">
+                        Radio button indicates the single authoritative correct option.
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const n = options.length + 1;
+                        setOptions([...options, { id: `opt_${n}`, text: `Option ${n}`, is_correct: false }]);
+                      }}
+                      className="text-xs font-bold text-blue-600 hover:text-blue-800"
+                    >
+                      + Add Choice
+                    </button>
                   </div>
                   <div className="space-y-2">
                     {options.map((opt, oIdx) => (
                       <div key={opt.id || oIdx} className="flex items-center space-x-2">
                         <input
-                          type={questionType === 'MCQ_MULTIPLE' ? 'checkbox' : 'radio'}
-                          name="correct_option_radio"
+                          type="radio"
+                          name="single_mcq_radio"
+                          checked={opt.is_correct}
+                          onChange={() => {
+                            setOptions(options.map((o, i) => ({ ...o, is_correct: i === oIdx })));
+                          }}
+                          className="w-4 h-4 text-blue-600 cursor-pointer"
+                          title="Mark as correct answer"
+                        />
+                        <input
+                          type="text"
+                          value={opt.text}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setOptions(options.map((o, i) => i === oIdx ? { ...o, text: val } : o));
+                          }}
+                          placeholder={`Option ${oIdx + 1} text`}
+                          className="flex-1 bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs text-slate-800 outline-none focus:border-blue-500"
+                        />
+                        {options.length > 2 && (
+                          <button
+                            type="button"
+                            onClick={() => setOptions(options.filter((_, i) => i !== oIdx))}
+                            className="text-slate-400 hover:text-rose-600 text-xs px-1.5"
+                            title="Remove choice"
+                          >
+                            ✕
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* 2. Multiple-Select MCQ */}
+              {questionType === 'MCQ_MULTIPLE' && (
+                <div className="space-y-3 p-3.5 bg-slate-50 border border-slate-200 rounded-2xl">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <label className="text-xs font-bold text-slate-800 block">
+                        Multiple-Select Options (Select all correct answers)
+                      </label>
+                      <span className="text-[11px] text-blue-600 font-semibold">
+                        Grading policy: Full marks awarded only when all correct options are selected.
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const n = options.length + 1;
+                        setOptions([...options, { id: `opt_${n}`, text: `Option ${n}`, is_correct: false }]);
+                      }}
+                      className="text-xs font-bold text-blue-600 hover:text-blue-800"
+                    >
+                      + Add Choice
+                    </button>
+                  </div>
+                  <div className="space-y-2">
+                    {options.map((opt, oIdx) => (
+                      <div key={opt.id || oIdx} className="flex items-center space-x-2">
+                        <input
+                          type="checkbox"
                           checked={opt.is_correct}
                           onChange={(e) => {
-                            if (questionType === 'MCQ_MULTIPLE') {
-                              setOptions(options.map((o, i) => i === oIdx ? { ...o, is_correct: e.target.checked } : o));
-                            } else {
-                              setOptions(options.map((o, i) => ({ ...o, is_correct: i === oIdx })));
-                            }
+                            const checked = e.target.checked;
+                            setOptions(options.map((o, i) => i === oIdx ? { ...o, is_correct: checked } : o));
                           }}
                           className="w-4 h-4 text-blue-600 rounded cursor-pointer"
                           title="Mark as correct answer"
@@ -745,13 +937,14 @@ export default function QuestionBankManager() {
                             setOptions(options.map((o, i) => i === oIdx ? { ...o, text: val } : o));
                           }}
                           placeholder={`Option ${oIdx + 1} text`}
-                          className="flex-1 bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs text-slate-800 outline-none"
+                          className="flex-1 bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs text-slate-800 outline-none focus:border-blue-500"
                         />
-                        {options.length > 2 && questionType !== 'TRUE_FALSE' && (
+                        {options.length > 2 && (
                           <button
                             type="button"
                             onClick={() => setOptions(options.filter((_, i) => i !== oIdx))}
-                            className="text-slate-400 hover:text-rose-600 text-xs px-1"
+                            className="text-slate-400 hover:text-rose-600 text-xs px-1.5"
+                            title="Remove choice"
                           >
                             ✕
                           </button>
@@ -762,118 +955,134 @@ export default function QuestionBankManager() {
                 </div>
               )}
 
-              {/* 2. Fill in the Blank */}
-              {questionType === 'FILL_IN_BLANK' && (
-                <div className="space-y-2 p-3.5 bg-slate-50 border border-slate-200 rounded-2xl">
-                  <div className="flex items-center justify-between">
-                    <label className="text-xs font-bold text-slate-800">
-                      Accepted Answers for Blank
-                    </label>
-                    <button
-                      type="button"
-                      onClick={() => setOptions([...options, { id: `fib_${options.length + 1}`, text: '', is_correct: true }])}
-                      className="text-[11px] font-bold text-blue-600 hover:text-blue-800"
-                    >
-                      + Add Accepted Answer
-                    </button>
-                  </div>
-                  <div className="space-y-2">
-                    {options.map((opt, oIdx) => (
-                      <div key={oIdx} className="flex items-center space-x-2">
-                        <span className="text-xs text-slate-400 font-mono">#{oIdx + 1}</span>
-                        <input
-                          type="text"
-                          value={opt.text}
-                          onChange={(e) => {
-                            const val = e.target.value;
-                            setOptions(options.map((o, i) => i === oIdx ? { ...o, text: val, is_correct: true } : o));
-                          }}
-                          placeholder="e.g. 443 or HTTPS"
-                          className="flex-1 bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs text-slate-800 outline-none"
-                        />
-                        {options.length > 1 && (
-                          <button
-                            type="button"
-                            onClick={() => setOptions(options.filter((_, i) => i !== oIdx))}
-                            className="text-slate-400 hover:text-rose-600 text-xs px-1"
-                          >
-                            ✕
-                          </button>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* 3. Python Coding Details */}
-              {questionType === 'CODING' && (
+              {/* 3. True / False */}
+              {questionType === 'TRUE_FALSE' && (
                 <div className="space-y-3 p-3.5 bg-slate-50 border border-slate-200 rounded-2xl">
                   <div>
-                    <label className="block text-xs font-bold text-slate-800 mb-1">Python Starter Code</label>
+                    <label className="text-xs font-bold text-slate-800 block">
+                      True / False Options (Select the correct answer)
+                    </label>
+                    <span className="text-[11px] text-slate-500">
+                      Standard binary proposition evaluation.
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    {options.slice(0, 2).map((opt, oIdx) => (
+                      <label
+                        key={opt.id || oIdx}
+                        className={`flex items-center space-x-2 p-3 rounded-xl border cursor-pointer transition ${
+                          opt.is_correct
+                            ? 'bg-blue-50 border-blue-500 text-blue-900 font-bold'
+                            : 'bg-white border-slate-200 text-slate-700'
+                        }`}
+                      >
+                        <input
+                          type="radio"
+                          name="tf_radio"
+                          checked={opt.is_correct}
+                          onChange={() => {
+                            setOptions(options.map((o, i) => ({ ...o, is_correct: i === oIdx })));
+                          }}
+                          className="w-4 h-4 text-blue-600"
+                        />
+                        <span className="text-xs">{opt.text}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* 4. Python Coding Details */}
+              {questionType === 'CODING' && (
+                <div className="space-y-4 p-4 bg-slate-50 border border-slate-200 rounded-2xl">
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="text-xs font-bold text-slate-800">Python Starter Code *</label>
+                      <span className="text-[10px] text-slate-400 font-mono">Python 3 Execution Environment</span>
+                    </div>
                     <textarea
-                      rows={3}
+                      rows={4}
                       value={starterCode}
                       onChange={(e) => setStarterCode(e.target.value)}
+                      placeholder="def solve():\n    # Solution starter code\n    pass\n"
                       className="w-full bg-slate-900 text-emerald-400 font-mono text-xs border border-slate-700 rounded-xl p-3 outline-none"
                     />
                   </div>
 
                   <div>
-                    <div className="flex items-center justify-between mb-1.5">
-                      <label className="text-xs font-bold text-slate-800">Test Cases</label>
+                    <div className="flex items-center justify-between mb-2">
+                      <div>
+                        <label className="text-xs font-bold text-slate-800 block">Test Cases *</label>
+                        <span className="text-[11px] text-slate-500">
+                          Public test cases are candidate-runnable; hidden test cases are reserved for server grading.
+                        </span>
+                      </div>
                       <button
                         type="button"
                         onClick={() => setCodingTestCases([...codingTestCases, { input: '', expected_output: '', is_hidden: false }])}
-                        className="text-[11px] font-bold text-blue-600 hover:text-blue-800"
+                        className="text-xs font-bold text-blue-600 hover:text-blue-800"
                       >
                         + Add Test Case
                       </button>
                     </div>
 
-                    <div className="space-y-2">
+                    <div className="space-y-2.5">
                       {codingTestCases.map((tc, tcIdx) => (
-                        <div key={tcIdx} className="p-2.5 bg-white border border-slate-200 rounded-xl space-y-1.5">
-                          <div className="flex items-center justify-between text-[11px]">
+                        <div key={tcIdx} className="p-3 bg-white border border-slate-200 rounded-xl space-y-2">
+                          <div className="flex items-center justify-between text-xs">
                             <span className="font-bold text-slate-700">Test Case #{tcIdx + 1}</span>
-                            <label className="flex items-center space-x-1 cursor-pointer">
-                              <input
-                                type="checkbox"
-                                checked={tc.is_hidden}
-                                onChange={(e) => {
-                                  const checked = e.target.checked;
-                                  setCodingTestCases(codingTestCases.map((t, i) => i === tcIdx ? { ...t, is_hidden: checked } : t));
-                                }}
-                                className="w-3.5 h-3.5 text-blue-600 rounded"
-                              />
-                              <span className="text-[11px] font-semibold text-slate-600">Hidden from Candidate</span>
-                            </label>
+                            <div className="flex items-center space-x-3">
+                              <label className="flex items-center space-x-1.5 cursor-pointer">
+                                <input
+                                  type="checkbox"
+                                  checked={tc.is_hidden}
+                                  onChange={(e) => {
+                                    const checked = e.target.checked;
+                                    setCodingTestCases(codingTestCases.map((t, i) => i === tcIdx ? { ...t, is_hidden: checked } : t));
+                                  }}
+                                  className="w-3.5 h-3.5 text-blue-600 rounded"
+                                />
+                                <span className={`text-[11px] font-semibold ${tc.is_hidden ? 'text-purple-700 font-bold' : 'text-slate-600'}`}>
+                                  {tc.is_hidden ? '🔒 Hidden (Grading only)' : '👁️ Public (Sample)'}
+                                </span>
+                              </label>
+                              {codingTestCases.length > 1 && (
+                                <button
+                                  type="button"
+                                  onClick={() => setCodingTestCases(codingTestCases.filter((_, i) => i !== tcIdx))}
+                                  className="text-slate-400 hover:text-rose-600 text-xs px-1"
+                                  title="Delete test case"
+                                >
+                                  ✕
+                                </button>
+                              )}
+                            </div>
                           </div>
                           <div className="grid grid-cols-2 gap-2">
                             <div>
-                              <span className="text-[10px] text-slate-400 font-semibold">Standard Input</span>
-                              <input
-                                type="text"
+                              <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider block mb-0.5">Standard Input (stdin)</span>
+                              <textarea
+                                rows={2}
                                 value={tc.input}
                                 onChange={(e) => {
                                   const val = e.target.value;
                                   setCodingTestCases(codingTestCases.map((t, i) => i === tcIdx ? { ...t, input: val } : t));
                                 }}
-                                placeholder="5\n10 20..."
-                                className="w-full bg-slate-50 border border-slate-200 rounded-lg p-1.5 text-xs font-mono"
+                                placeholder="e.g. 5\n1 2 3 4 5"
+                                className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 text-xs font-mono outline-none"
                               />
                             </div>
                             <div>
-                              <span className="text-[10px] text-slate-400 font-semibold">Expected Output</span>
-                              <input
-                                type="text"
+                              <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider block mb-0.5">Expected Output (stdout) *</span>
+                              <textarea
+                                rows={2}
                                 value={tc.expected_output}
                                 onChange={(e) => {
                                   const val = e.target.value;
                                   setCodingTestCases(codingTestCases.map((t, i) => i === tcIdx ? { ...t, expected_output: val } : t));
                                 }}
-                                placeholder="30"
-                                className="w-full bg-slate-50 border border-slate-200 rounded-lg p-1.5 text-xs font-mono"
+                                placeholder="e.g. 15"
+                                className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 text-xs font-mono outline-none"
                               />
                             </div>
                           </div>
@@ -884,29 +1093,57 @@ export default function QuestionBankManager() {
                 </div>
               )}
 
-              {/* 4. SQL Question Details */}
-              {questionType === 'SQL' && (
+              {/* 5. Descriptive / Subjective Question Details */}
+              {questionType === 'DESCRIPTIVE' && (
                 <div className="space-y-3 p-3.5 bg-slate-50 border border-slate-200 rounded-2xl">
-                  <div>
-                    <label className="block text-xs font-bold text-slate-800 mb-1">Schema SQL (Tables & Seed DDL)</label>
-                    <textarea
-                      rows={3}
-                      value={schemaSql}
-                      onChange={(e) => setSchemaSql(e.target.value)}
-                      placeholder="CREATE TABLE ..."
-                      className="w-full bg-slate-900 text-blue-300 font-mono text-xs border border-slate-700 rounded-xl p-3 outline-none"
-                    />
+                  <div className="p-2.5 rounded-xl bg-blue-50 border border-blue-200 text-xs text-blue-800">
+                    💡 <strong>Recruiter Manual Grading:</strong> Descriptive answers are manually reviewed and graded in the proctoring review console. Negative marks are disabled.
                   </div>
-
                   <div>
-                    <label className="block text-xs font-bold text-slate-800 mb-1">Reference Solution SQL (Hidden from candidates)</label>
+                    <label className="block text-xs font-bold text-slate-800 mb-1">
+                      Scoring Rubric & Evaluation Criteria
+                    </label>
                     <textarea
                       rows={2}
-                      value={solutionSql}
-                      onChange={(e) => setSolutionSql(e.target.value)}
-                      placeholder="SELECT ..."
-                      className="w-full bg-slate-900 text-emerald-400 font-mono text-xs border border-slate-700 rounded-xl p-3 outline-none"
+                      value={evaluationCriteria}
+                      onChange={(e) => setEvaluationCriteria(e.target.value)}
+                      placeholder="e.g. Concept accuracy (40%), Technical depth (40%), Practical real-world examples (20%)"
+                      className="w-full bg-white border border-slate-300 rounded-xl p-2.5 text-xs text-slate-900 outline-none focus:border-blue-500"
                     />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-800 mb-1">
+                      Model / Reference Answer (Hidden from candidate)
+                    </label>
+                    <textarea
+                      rows={3}
+                      value={expectedAnswer}
+                      onChange={(e) => setExpectedAnswer(e.target.value)}
+                      placeholder="Reference solution guidelines and keywords used by evaluators when reviewing candidate responses..."
+                      className="w-full bg-white border border-slate-300 rounded-xl p-2.5 text-xs text-slate-900 outline-none focus:border-blue-500"
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">Min Word Count</label>
+                      <input
+                        type="number"
+                        min="0"
+                        value={minWords}
+                        onChange={(e) => setMinWords(e.target.value)}
+                        className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-900 font-mono"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">Max Word Count</label>
+                      <input
+                        type="number"
+                        min="1"
+                        value={maxWords}
+                        onChange={(e) => setMaxWords(e.target.value)}
+                        className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-900 font-mono"
+                      />
+                    </div>
                   </div>
                 </div>
               )}

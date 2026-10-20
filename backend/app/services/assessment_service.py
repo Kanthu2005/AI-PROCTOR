@@ -11,6 +11,20 @@ from app.schemas.assessment import AssessmentCreate, AssessmentUpdate, Assessmen
 class AssessmentService:
     @staticmethod
     def create_assessment(db: Session, assess_in: AssessmentCreate, user_id: Optional[str] = None) -> Assessment:
+        from app.models.assessment import ResultReleasePolicy
+        policy_raw = getattr(assess_in, 'result_release_policy', None) or getattr(assess_in, 'result_publication_policy', 'MANUAL')
+        policy_enum = ResultReleasePolicy.MANUAL
+        if isinstance(policy_raw, str):
+            p_upper = policy_raw.upper()
+            if p_upper == "SCHEDULED":
+                policy_enum = ResultReleasePolicy.SCHEDULED
+            elif p_upper == "AFTER_REVIEW":
+                policy_enum = ResultReleasePolicy.AFTER_REVIEW
+            else:
+                policy_enum = ResultReleasePolicy.MANUAL
+        elif isinstance(policy_raw, ResultReleasePolicy):
+            policy_enum = policy_raw
+
         assessment = Assessment(
             org_id=assess_in.org_id,
             title=assess_in.title,
@@ -24,7 +38,8 @@ class AssessmentService:
             start_time=assess_in.start_time,
             end_time=assess_in.end_time,
             max_attempts=assess_in.max_attempts,
-            result_publication_policy=assess_in.result_publication_policy,
+            result_publication_policy=getattr(assess_in, 'result_publication_policy', 'IMMEDIATE'),
+            result_release_policy=policy_enum,
             is_active=True,
             created_by_id=user_id
         )
@@ -354,6 +369,15 @@ class AssessmentService:
                         "test_queries": qv.sql_details.get("test_queries", [])
                     }
 
+                # Sanitize descriptive details (strip private expected_answer / internal scoring rubric)
+                sanitized_descriptive = {}
+                if getattr(qv, "descriptive_details", None):
+                    sanitized_descriptive = {
+                        "evaluation_criteria": qv.descriptive_details.get("evaluation_criteria", ""),
+                        "min_words": qv.descriptive_details.get("min_words", 0),
+                        "max_words": qv.descriptive_details.get("max_words", 1000)
+                    }
+
                 questions_payload.append({
                     "section_question_id": sq.id,
                     "question_id": sq.question_id,
@@ -366,6 +390,7 @@ class AssessmentService:
                     "options": sanitized_options,
                     "coding_details": sanitized_coding,
                     "sql_details": sanitized_sql,
+                    "descriptive_details": sanitized_descriptive,
                     "order_index": sq.order_index
                 })
 
@@ -391,8 +416,12 @@ class AssessmentService:
                 "full_screen_enforced": rules.full_screen_enforced if rules else True,
                 "max_tab_switches_allowed": rules.max_tab_switches_allowed if rules else 3,
                 "webcam_proctoring_enabled": rules.webcam_proctoring_enabled if rules else True,
+                "mic_required": getattr(rules, "mic_required", False) if rules else False,
                 "devtools_block_enabled": rules.devtools_block_enabled if rules else True,
                 "copy_paste_blocked": rules.copy_paste_blocked if rules else True,
+                "identity_match_enabled": getattr(rules, "identity_match_enabled", False) if rules else False,
+                "identity_match_threshold": getattr(rules, "identity_match_threshold", 0.70) if rules else 0.70,
+                "require_manual_approval": getattr(rules, "require_manual_approval", False) if rules else False,
                 "seb_required": rules.seb_required if rules else False,
                 "seb_allow_quit": rules.seb_allow_quit if rules else True
             },

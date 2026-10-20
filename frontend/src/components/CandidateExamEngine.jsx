@@ -54,6 +54,8 @@ export default function CandidateExamEngine({ defaultToken = '', onBackToHome })
   // Real Webcam Media Stream
   const [mediaStream, setMediaStream] = useState(null);
   const [cameraError, setCameraError] = useState(null);
+  const [faceStatus, setFaceStatus] = useState('Camera Not Started');
+  const [proctorWarning, setProctorWarning] = useState(null);
   const systemCheckVideoRef = useRef(null);
   const verifyVideoRef = useRef(null);
   const examVideoRef = useRef(null);
@@ -108,6 +110,13 @@ export default function CandidateExamEngine({ defaultToken = '', onBackToHome })
       setLoading(true);
       setError(null);
       let data = null;
+      let valData = null;
+      try {
+        valData = await api.validateExamInvitation(tok);
+      } catch (err) {
+        console.warn('validateExamInvitation fallback:', err);
+      }
+
       try {
         data = await api.getInstructions(tok);
       } catch (err) {
@@ -116,21 +125,32 @@ export default function CandidateExamEngine({ defaultToken = '', onBackToHome })
         data = {
           invitation_id: inv.id,
           assessment_id: inv.assessment_id,
-          assessment_title: 'Technical Assessment',
-          duration_minutes: 60,
-          total_marks: 100,
-          passing_percentage: 60,
+          assessment_title: valData?.assessment_title || 'Technical Assessment',
+          duration_minutes: valData?.duration_minutes || 60,
+          total_marks: valData?.total_marks || 100,
+          passing_percentage: valData?.passing_percentage || 60,
           rules: {
             navigation_mode: 'FREE',
             negative_marking_enabled: true,
             full_screen_enforced: true,
             webcam_proctoring_enabled: true
           },
-          candidate_name: inv.full_name,
-          candidate_email: inv.email,
+          candidate_name: inv.full_name || valData?.candidate_name,
+          candidate_email: inv.email || valData?.candidate_email,
           status: inv.status,
           system_check_passed: inv.system_check_passed
         };
+      }
+
+      if (valData) {
+        data.schedule_status = valData.schedule_status;
+        data.can_start = valData.can_start;
+        data.start_time = valData.start_time;
+        data.end_time = valData.end_time;
+        data.time_until_start_seconds = valData.time_until_start_seconds;
+        if (valData.assessment_title) data.assessment_title = valData.assessment_title;
+        if (valData.assessment_description) data.description = valData.assessment_description;
+        if (valData.instructions) data.instructions = valData.instructions;
       }
 
       setInstructions(data);
@@ -158,10 +178,11 @@ export default function CandidateExamEngine({ defaultToken = '', onBackToHome })
     }
   };
 
-  // Webcam stream management
+  // Real Webcam stream management
   const initWebcamStream = async () => {
     try {
       setCameraError(null);
+      setFaceStatus('Permission Required');
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: 'user' },
         audio: true
@@ -169,12 +190,30 @@ export default function CandidateExamEngine({ defaultToken = '', onBackToHome })
       setMediaStream(stream);
       setCameraOk(true);
       setMicOk(true);
+      setFaceStatus('Camera Ready');
+
+      // Listen for camera disconnect or hardware track interruption
+      stream.getVideoTracks().forEach(track => {
+        track.onended = () => {
+          setCameraOk(false);
+          setFaceStatus('Camera Disconnected');
+          if (attemptId) {
+            api.sendProctorEvent(attemptId, {
+              event_type: 'CAMERA_DISCONNECTED',
+              metadata: { source: 'track_ended' },
+              client_timestamp: new Date().toISOString()
+            }).catch(() => {});
+          }
+        };
+      });
+
       return stream;
     } catch (err) {
-      console.warn('Media devices request failed, using simulator:', err);
-      setCameraError('Camera access not granted or not detected. Operating in secure mode.');
-      setCameraOk(true);
-      setMicOk(true);
+      console.warn('Real webcam device access error:', err);
+      setCameraError(err?.message || 'Camera permission denied or camera device disconnected.');
+      setCameraOk(false);
+      setMicOk(false);
+      setFaceStatus('Camera Disconnected');
       return null;
     }
   };
@@ -229,6 +268,98 @@ export default function CandidateExamEngine({ defaultToken = '', onBackToHome })
     await handleSubmitExam(true);
   };
 
+  // Real Proctoring Event Listeners & Periodic CV Face Detection
+  useEffect(() => {
+    if (stage !== 'IN_EXAM' || isSubmitted || !attemptId) return;
+
+    // 1. Browser Tab Visibility Tracking
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        api.sendProctorEvent(attemptId, {
+          event_type: 'TAB_SWITCH',
+          metadata: { reason: 'visibility_hidden' },
+          client_timestamp: new Date().toISOString()
+        }).then(res => {
+          if (res?.disqualified) {
+            alert('Your examination has been terminated due to repeated proctoring violations.');
+            handleSubmitExam(true);
+          } else if (res?.explanation) {
+            setProctorWarning(res.explanation);
+            setTimeout(() => setProctorWarning(null), 5000);
+          }
+        }).catch(() => {});
+      }
+    };
+
+    // 2. Fullscreen Exit Tracking
+    const handleFullscreenChange = () => {
+      if (!document.fullscreenElement && rules?.full_screen_enforced !== false) {
+        api.sendProctorEvent(attemptId, {
+          event_type: 'FULLSCREEN_EXIT',
+          metadata: { reason: 'fullscreen_exit' },
+          client_timestamp: new Date().toISOString()
+        }).then(res => {
+          if (res?.explanation) {
+            setProctorWarning(res.explanation);
+            setTimeout(() => setProctorWarning(null), 5000);
+          }
+        }).catch(() => {});
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+
+    // 3. Periodic Face Detection Check (every 12 seconds)
+    const faceInterval = setInterval(async () => {
+      if (!examVideoRef.current || !mediaStream) {
+        setFaceStatus('Camera Disconnected');
+        return;
+      }
+      try {
+        setFaceStatus('Detecting');
+        const canvas = document.createElement('canvas');
+        canvas.width = 320;
+        canvas.height = 240;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(examVideoRef.current, 0, 0, 320, 240);
+        const frameData = canvas.toDataURL('image/jpeg', 0.7);
+
+        const res = await api.sendProctorEvent(attemptId, {
+          event_type: 'FACE_PRESENT',
+          snapshot_base64: frameData,
+          client_timestamp: new Date().toISOString()
+        });
+
+        if (res) {
+          if (res.event_type === 'FACE_MISSING') {
+            setFaceStatus('Face Not Detected');
+            setProctorWarning('Warning: No face detected in webcam frame. Please stay centered.');
+          } else if (res.event_type === 'MULTIPLE_FACES') {
+            setFaceStatus('Multiple Faces Detected');
+            setProctorWarning('Alert: Multiple faces detected in camera feed.');
+          } else {
+            setFaceStatus('Face Detected');
+          }
+
+          if (res.disqualified) {
+            alert('Your examination has been terminated due to proctoring infractions.');
+            handleSubmitExam(true);
+          }
+        }
+      } catch (err) {
+        console.warn('Periodic face detection frame processing error:', err);
+        setFaceStatus('Detection Unavailable');
+      }
+    }, 12000);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      document.removeEventListener('fullscreenchange', handleFullscreenChange);
+      clearInterval(faceInterval);
+    };
+  }, [stage, isSubmitted, attemptId, mediaStream, rules]);
+
   // Format seconds to HH:MM:SS
   const formatTimer = (sec) => {
     const h = Math.floor(sec / 3600);
@@ -255,7 +386,7 @@ export default function CandidateExamEngine({ defaultToken = '', onBackToHome })
   const handleCaptureFaceAndVerify = async () => {
     setVerifyingFace(true);
     try {
-      let snapshotData = 'data:image/jpeg;base64,samplefacesnapshot';
+      let snapshotData = null;
       if (verifyVideoRef.current && mediaStream) {
         try {
           const canvas = document.createElement('canvas');
@@ -264,8 +395,18 @@ export default function CandidateExamEngine({ defaultToken = '', onBackToHome })
           const ctx = canvas.getContext('2d');
           ctx.drawImage(verifyVideoRef.current, 0, 0, 320, 240);
           snapshotData = canvas.toDataURL('image/jpeg', 0.8);
-        } catch (e) {}
+        } catch (e) {
+          console.warn('Frame snapshot canvas conversion error:', e);
+        }
       }
+
+      if (!snapshotData) {
+        setCameraError('Failed to capture frame from webcam. Please ensure webcam permissions are enabled.');
+        setFaceStatus('Camera Disconnected');
+        setVerificationSuccess(false);
+        return;
+      }
+
       setFaceSnapshot(snapshotData);
 
       const tok = tokenInput || invitation?.invitation_token;
@@ -280,9 +421,11 @@ export default function CandidateExamEngine({ defaultToken = '', onBackToHome })
       }
 
       setVerificationSuccess(true);
+      setFaceStatus('Face Detected');
     } catch (err) {
-      console.warn('System check submission failed, proceeding:', err);
-      setVerificationSuccess(true);
+      console.warn('System check submission failed:', err);
+      setCameraError(err?.message || 'Identity verification check failed.');
+      setVerificationSuccess(false);
     } finally {
       setVerifyingFace(false);
     }
@@ -579,21 +722,37 @@ export default function CandidateExamEngine({ defaultToken = '', onBackToHome })
       const testCases = curQ?.coding_details?.public_test_cases || [
         { input: '4 12 8 30 2', expected_output: '30' }
       ];
-      const res = await api.runSandboxCode(code, testCases).catch(() => null);
+      const res = await api.runSandboxCode(code, testCases).catch((err) => ({ error: err.message || 'Failed to connect to execution sandbox' }));
       if (res && res.passed_test_cases !== undefined) {
         const passed = res.passed_test_cases;
         const total = res.total_test_cases || testCases.length;
-        const details = (res.results || []).map((r, i) => 
-          `Test Case #${i+1}: ${r.passed ? 'PASSED ✓' : 'FAILED ✗'} (${r.execution_time_ms || 0}ms)`
-        ).join('\n');
+        const details = (res.results || []).map((r, i) => {
+          let line = `Test Case #${i+1}: ${r.passed ? 'PASSED ✓' : 'FAILED ✗'} (${r.execution_time_ms || 0}ms)`;
+          if (!r.passed && r.failure_type) {
+            line += ` [${r.failure_type}]`;
+          }
+          if (r.error) {
+            line += `\n  Error: ${r.error}`;
+          }
+          return line;
+        }).join('\n\n');
+        const verdict = res.all_passed ? 'ACCEPTED (ALL PASSED)' : (res.failure_type || (passed > 0 ? 'PARTIAL' : 'FAILED'));
         setSandboxOutput({
-          stdout: `${details}\n\nExecution Summary: ${passed}/${total} test cases passed. Status: ${res.all_passed ? 'ALL PASSED' : 'PARTIAL'}`
+          stdout: `${details}\n\n----------------------------------------\nExecution Summary: ${passed}/${total} test cases passed.\nVerdict: ${verdict}`
+        });
+      } else if (res && res.error) {
+        setSandboxOutput({
+          stdout: `Execution Failed:\n${res.error}\nVerdict: ${res.failure_type || 'RUNTIME_ERROR'}`
         });
       } else {
-        setSandboxOutput({ stdout: 'Execution Complete: Sample public tests validated successfully ✓' });
+        setSandboxOutput({
+          stdout: 'Execution Error: Unable to complete test execution in the sandbox.'
+        });
       }
     } catch (e) {
-      setSandboxOutput({ stdout: 'Execution Complete: Code output verified successfully ✓' });
+      setSandboxOutput({
+        stdout: `Execution Exception: ${e?.message || 'Unexpected sandbox error.'}`
+      });
     } finally {
       setRunningSandbox(false);
     }
@@ -752,6 +911,33 @@ export default function CandidateExamEngine({ defaultToken = '', onBackToHome })
 
           {/* Rules & Guidelines */}
           <div className="p-6 sm:p-8 space-y-6">
+            
+            {/* Scheduling Window Status Alert */}
+            {instructions?.schedule_status === 'UPCOMING' && (
+              <div className="p-4 rounded-2xl bg-amber-50 border border-amber-200 text-amber-900 flex items-start space-x-3 shadow-xs">
+                <Clock className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+                <div>
+                  <div className="font-bold text-sm">Exam Scheduled — Not Yet Open</div>
+                  <div className="text-xs text-amber-800 mt-1">
+                    This assessment is scheduled to open at <strong>{instructions.start_time ? new Date(instructions.start_time).toLocaleString() : 'a designated time'}</strong>.
+                    Access to pre-checks and the test questions will unlock automatically once the window opens.
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {instructions?.schedule_status === 'EXPIRED' && (
+              <div className="p-4 rounded-2xl bg-rose-50 border border-rose-200 text-rose-900 flex items-start space-x-3 shadow-xs">
+                <AlertTriangle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
+                <div>
+                  <div className="font-bold text-sm">Examination Window Expired</div>
+                  <div className="text-xs text-rose-800 mt-1">
+                    The scheduled window or deadline for this examination has passed. Please contact your assessment coordinator if you require a rescheduled session.
+                  </div>
+                </div>
+              </div>
+            )}
+
             <div>
               <h3 className="text-sm font-bold uppercase tracking-wider text-slate-500 mb-3">
                 Mandatory Assessment Rules & Guidelines
@@ -786,9 +972,16 @@ export default function CandidateExamEngine({ defaultToken = '', onBackToHome })
 
               <button
                 onClick={handleProceedToSystemCheck}
-                className="w-full sm:w-auto px-8 py-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold shadow-lg shadow-blue-500/25 transition flex items-center justify-center space-x-2"
+                disabled={instructions?.can_start === false}
+                className="w-full sm:w-auto px-8 py-3 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-white text-sm font-bold shadow-lg shadow-blue-500/25 transition flex items-center justify-center space-x-2"
               >
-                <span>Proceed to Device Diagnostics</span>
+                <span>
+                  {instructions?.schedule_status === 'UPCOMING'
+                    ? 'Exam Window Upcoming'
+                    : instructions?.schedule_status === 'EXPIRED'
+                    ? 'Exam Window Closed'
+                    : 'Proceed to Device Diagnostics'}
+                </span>
                 <ArrowRight className="w-4 h-4" />
               </button>
             </div>
@@ -814,7 +1007,7 @@ export default function CandidateExamEngine({ defaultToken = '', onBackToHome })
 
           {/* Live Webcam Preview */}
           <div className="relative w-full h-56 sm:h-64 rounded-2xl bg-slate-900 overflow-hidden border border-slate-800 flex items-center justify-center">
-            {mediaStream ? (
+            {mediaStream && cameraOk ? (
               <video 
                 ref={systemCheckVideoRef} 
                 autoPlay 
@@ -825,14 +1018,25 @@ export default function CandidateExamEngine({ defaultToken = '', onBackToHome })
             ) : (
               <div className="text-center p-4">
                 <Camera className="w-10 h-10 text-slate-600 mx-auto mb-2 animate-pulse" />
-                <span className="text-xs text-slate-400 font-mono">Camera Diagnostics Active</span>
+                <span className="text-xs text-slate-400 font-mono">
+                  {cameraError || 'Camera stream not initialized'}
+                </span>
               </div>
             )}
-            <div className="absolute top-3 left-3 px-2.5 py-1 rounded-full bg-emerald-500/90 text-white text-[10px] font-bold flex items-center space-x-1.5">
-              <span className="w-2 h-2 rounded-full bg-white animate-pulse" />
-              <span>VIDEO STREAM DETECTED</span>
+            <div className={`absolute top-3 left-3 px-2.5 py-1 rounded-full text-white text-[10px] font-bold flex items-center space-x-1.5 ${
+              cameraOk ? 'bg-emerald-500/90' : 'bg-rose-500/90'
+            }`}>
+              <span className={`w-2 h-2 rounded-full bg-white ${cameraOk ? 'animate-pulse' : ''}`} />
+              <span>{cameraOk ? 'VIDEO STREAM ACTIVE' : 'CAMERA NOT DETECTED'}</span>
             </div>
           </div>
+
+          {cameraError && (
+            <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-xs text-rose-700 font-medium flex items-center space-x-2">
+              <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" />
+              <span>{cameraError}</span>
+            </div>
+          )}
 
           {/* Diagnostic Checks List */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
@@ -841,9 +1045,15 @@ export default function CandidateExamEngine({ defaultToken = '', onBackToHome })
                 <Camera className="w-4 h-4 text-blue-600" />
                 <span className="font-semibold text-slate-700">Webcam Hardware</span>
               </div>
-              <span className="text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded font-bold flex items-center space-x-1">
-                <Check className="w-3.5 h-3.5" /> <span>Passed</span>
-              </span>
+              {cameraOk ? (
+                <span className="text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded font-bold flex items-center space-x-1">
+                  <Check className="w-3.5 h-3.5" /> <span>Passed</span>
+                </span>
+              ) : (
+                <span className="text-rose-700 bg-rose-50 px-2 py-0.5 rounded font-bold flex items-center space-x-1">
+                  <AlertCircle className="w-3.5 h-3.5" /> <span>Failed / Required</span>
+                </span>
+              )}
             </div>
 
             <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-between">
@@ -851,9 +1061,15 @@ export default function CandidateExamEngine({ defaultToken = '', onBackToHome })
                 <Mic className="w-4 h-4 text-blue-600" />
                 <span className="font-semibold text-slate-700">Microphone Input</span>
               </div>
-              <span className="text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded font-bold flex items-center space-x-1">
-                <Check className="w-3.5 h-3.5" /> <span>Passed</span>
-              </span>
+              {micOk ? (
+                <span className="text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded font-bold flex items-center space-x-1">
+                  <Check className="w-3.5 h-3.5" /> <span>Passed</span>
+                </span>
+              ) : (
+                <span className="text-rose-700 bg-rose-50 px-2 py-0.5 rounded font-bold flex items-center space-x-1">
+                  <AlertCircle className="w-3.5 h-3.5" /> <span>Failed / Required</span>
+                </span>
+              )}
             </div>
 
             <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-between">
@@ -862,7 +1078,7 @@ export default function CandidateExamEngine({ defaultToken = '', onBackToHome })
                 <span className="font-semibold text-slate-700">Browser Compatibility</span>
               </div>
               <span className="text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded font-bold flex items-center space-x-1">
-                <Check className="w-3.5 h-3.5" /> <span>Chrome/WebKit</span>
+                <Check className="w-3.5 h-3.5" /> <span>Compatible</span>
               </span>
             </div>
 
@@ -886,7 +1102,12 @@ export default function CandidateExamEngine({ defaultToken = '', onBackToHome })
             </button>
             <button
               onClick={handleProceedToIdentityVerify}
-              className="flex-1 py-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-sm shadow-md shadow-blue-500/25 transition flex items-center justify-center space-x-2"
+              disabled={!cameraOk || !micOk}
+              className={`flex-1 py-3 rounded-xl font-bold text-sm transition flex items-center justify-center space-x-2 ${
+                cameraOk && micOk
+                  ? 'bg-blue-600 hover:bg-blue-700 text-white shadow-md shadow-blue-500/25'
+                  : 'bg-slate-200 text-slate-400 cursor-not-allowed shadow-none'
+              }`}
             >
               <span>Confirm Hardware & Proceed to Identity Check</span>
               <ArrowRight className="w-4 h-4" />
@@ -1059,6 +1280,13 @@ export default function CandidateExamEngine({ defaultToken = '', onBackToHome })
           {/* Left 3 Columns: Active Question Card */}
           <div className="lg:col-span-3 flex flex-col space-y-4">
             
+            {proctorWarning && (
+              <div className="p-3.5 rounded-2xl bg-amber-50 border border-amber-300 text-amber-900 text-xs font-bold flex items-center space-x-2 shadow-xs">
+                <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+                <span>{proctorWarning}</span>
+              </div>
+            )}
+
             {/* Question Card */}
             <div className="bg-white rounded-3xl border border-slate-200 shadow-sm p-6 sm:p-8 flex-1 flex flex-col justify-between space-y-6">
               
@@ -1358,12 +1586,19 @@ export default function CandidateExamEngine({ defaultToken = '', onBackToHome })
                   <Eye className="w-4 h-4 text-blue-600" />
                   <span>Proctored Monitor</span>
                 </span>
-                <span className="px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 text-[10px] font-bold">
-                  ACTIVE
+                <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                  faceStatus === 'Face Detected' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' :
+                  faceStatus === 'Face Not Detected' ? 'bg-amber-50 text-amber-700 border border-amber-200 animate-pulse' :
+                  faceStatus === 'Multiple Faces Detected' ? 'bg-rose-50 text-rose-700 border border-rose-200 animate-pulse' :
+                  faceStatus === 'Detecting' ? 'bg-purple-50 text-purple-700 border border-purple-200' :
+                  faceStatus === 'Camera Disconnected' ? 'bg-rose-100 text-rose-800 border border-rose-300' :
+                  'bg-slate-100 text-slate-700'
+                }`}>
+                  {faceStatus.toUpperCase()}
                 </span>
               </div>
               <div className="h-32 rounded-2xl bg-slate-900 overflow-hidden relative flex items-center justify-center">
-                {mediaStream ? (
+                {mediaStream && cameraOk ? (
                   <video
                     ref={examVideoRef}
                     autoPlay
@@ -1372,7 +1607,10 @@ export default function CandidateExamEngine({ defaultToken = '', onBackToHome })
                     className="w-full h-full object-cover scale-x-[-1]"
                   />
                 ) : (
-                  <ScanFace className="w-8 h-8 text-slate-600 animate-pulse" />
+                  <div className="text-center p-2">
+                    <ScanFace className="w-8 h-8 text-rose-400 mx-auto animate-pulse" />
+                    <span className="text-[10px] text-rose-300 block mt-1 font-mono">Camera Disconnected</span>
+                  </div>
                 )}
                 <div className="absolute bottom-2 left-2 px-2 py-0.5 rounded bg-black/60 text-white font-mono text-[9px]">
                   REC: LIVE
@@ -1569,29 +1807,16 @@ export default function CandidateExamEngine({ defaultToken = '', onBackToHome })
               </div>
             </div>
 
-            {/* Score / Performance if available */}
-            {attemptResult?.total_score !== undefined && (
-              <div className="grid grid-cols-3 gap-3 text-center p-4 rounded-2xl bg-blue-50/60 border border-blue-200/80">
-                <div>
-                  <div className="text-[11px] text-blue-600 font-bold uppercase">Score</div>
-                  <div className="text-xl font-extrabold text-blue-950 mt-0.5">
-                    {attemptResult.total_score} / {attemptResult.total_max_marks || 100}
-                  </div>
-                </div>
-                <div>
-                  <div className="text-[11px] text-blue-600 font-bold uppercase">Percentage</div>
-                  <div className="text-xl font-extrabold text-blue-950 mt-0.5">
-                    {attemptResult.percentage}%
-                  </div>
-                </div>
-                <div>
-                  <div className="text-[11px] text-blue-600 font-bold uppercase">Result</div>
-                  <div className={`text-base font-extrabold mt-1 ${attemptResult.is_passed ? 'text-emerald-700' : 'text-slate-700'}`}>
-                    {attemptResult.is_passed ? 'PASSED' : 'COMPLETED'}
-                  </div>
-                </div>
+            {/* Results Review & Confidentiality Notice */}
+            <div className="p-4 rounded-2xl bg-blue-50/70 border border-blue-200/80 text-xs text-blue-900 space-y-1.5">
+              <div className="font-bold text-blue-950 flex items-center space-x-1.5">
+                <span className="w-2 h-2 rounded-full bg-blue-600 animate-pulse"></span>
+                <span>Proctoring Audit & Evaluation Under Review</span>
               </div>
-            )}
+              <p className="text-slate-600 leading-relaxed">
+                Your examination responses and proctoring telemetry have been securely transferred to the hiring team. Final performance scores, integrity audit results, and individual selection decisions are reviewed and communicated directly by your recruiter.
+              </p>
+            </div>
 
             {/* Security Guarantee */}
             <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-600 flex items-center space-x-2.5">
