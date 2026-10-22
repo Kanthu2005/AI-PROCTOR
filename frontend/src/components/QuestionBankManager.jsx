@@ -76,11 +76,26 @@ export default function QuestionBankManager() {
   ]);
 
   // Coding Question Fields
+  const [codingLanguage, setCodingLanguage] = useState('python');
   const [starterCode, setStarterCode] = useState('def solve():\n    # Implement solution\n    pass\n');
   const [codingTestCases, setCodingTestCases] = useState([
     { input: '5\n1 2 3 4 5\n', expected_output: '5', is_hidden: false },
     { input: '3\n-1 -5 0\n', expected_output: '0', is_hidden: true }
   ]);
+
+  const handleCodingLanguageChange = (lang) => {
+    setCodingLanguage(lang);
+    if (!starterCode || starterCode.includes('def solve') || starterCode.includes('function solve') || starterCode.includes('class Solution')) {
+      if (lang === 'python') {
+        setStarterCode('def solve():\n    # Implement solution\n    pass\n');
+      } else if (lang === 'javascript') {
+        setStarterCode('function solve() {\n    // Implement solution\n}\nsolve();\n');
+      } else if (lang === 'java') {
+        setStarterCode('import java.util.*;\n\npublic class Solution {\n    public static void main(String[] args) {\n        // Implement solution\n    }\n}\n');
+      }
+    }
+  };
+
 
   // SQL Question Fields
   const [schemaSql, setSchemaSql] = useState('CREATE TABLE employees (\n  id INT PRIMARY KEY,\n  name VARCHAR(50),\n  salary INT\n);');
@@ -170,6 +185,7 @@ export default function QuestionBankManager() {
       { id: 'opt_4', text: 'Option D', is_correct: false }
     ]);
     setStarterCode('def solve():\n    # Read input and solve\n    pass\n');
+    setCodingLanguage('python');
     setCodingTestCases([
       { input: '1 2\n', expected_output: '3', is_hidden: false }
     ]);
@@ -208,9 +224,13 @@ export default function QuestionBankManager() {
     }
 
     if (cv.coding_details) {
+      setCodingLanguage(cv.coding_details.language || 'python');
       setStarterCode(cv.coding_details.starter_code || 'def solve():\n    pass\n');
       setCodingTestCases(cv.coding_details.test_cases || []);
+    } else {
+      setCodingLanguage('python');
     }
+
 
     if (cv.descriptive_details) {
       setEvaluationCriteria(cv.descriptive_details.evaluation_criteria || '');
@@ -341,7 +361,7 @@ export default function QuestionBankManager() {
       }
 
       const codingDetailsPayload = questionType === 'CODING' ? {
-        language: 'python',
+        language: codingLanguage,
         starter_code: starterCode,
         test_cases: codingTestCases.map(tc => ({
           input: tc.input || '',
@@ -351,6 +371,7 @@ export default function QuestionBankManager() {
           memory_limit_mb: 128
         }))
       } : undefined;
+
 
       const descriptiveDetailsPayload = questionType === 'DESCRIPTIVE' ? {
         evaluation_criteria: evaluationCriteria,
@@ -501,8 +522,9 @@ export default function QuestionBankManager() {
               <option value="MCQ_MULTIPLE">MCQ Multiple</option>
               <option value="TRUE_FALSE">True / False</option>
               <option value="DESCRIPTIVE">Descriptive</option>
-              <option value="CODING">Python Coding</option>
+              <option value="CODING">Coding (Multi-Language)</option>
             </select>
+
 
             <select
               value={difficultyFilter}
@@ -759,9 +781,10 @@ export default function QuestionBankManager() {
                     <option value="MCQ_MULTIPLE">Multiple-Select MCQ</option>
                     <option value="TRUE_FALSE">True / False</option>
                     <option value="DESCRIPTIVE">Descriptive Answer</option>
-                    <option value="CODING">Python Coding</option>
+                    <option value="CODING">Coding (Multi-Language)</option>
                     <option value="SQL" disabled>SQL Coding (Unsupported - No Sandbox Runner)</option>
                   </select>
+
                 </div>
 
                 <div>
@@ -992,22 +1015,42 @@ export default function QuestionBankManager() {
                 </div>
               )}
 
-              {/* 4. Python Coding Details */}
+              {/* 4. Multi-Language Coding Details */}
               {questionType === 'CODING' && (
                 <div className="space-y-4 p-4 bg-slate-50 border border-slate-200 rounded-2xl">
                   <div>
+                    <label className="text-xs font-bold text-slate-800 block mb-1">Execution Runtime / Language *</label>
+                    <select
+                      value={codingLanguage}
+                      onChange={(e) => handleCodingLanguageChange(e.target.value)}
+                      className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-semibold text-slate-800 outline-none focus:border-blue-600"
+                    >
+                      <option value="python">Python 3.12 (Host Verified)</option>
+                      <option value="javascript">JavaScript (Node.js 24 Host Verified)</option>
+                      <option value="java">Java 23 (Host Verified)</option>
+                      <option value="c" disabled>C (GCC compiler not available on server host — disabled)</option>
+                      <option value="cpp" disabled>C++ (G++ compiler not available on server host — disabled)</option>
+                    </select>
+                  </div>
+
+                  <div>
                     <div className="flex items-center justify-between mb-1">
-                      <label className="text-xs font-bold text-slate-800">Python Starter Code *</label>
-                      <span className="text-[10px] text-slate-400 font-mono">Python 3 Execution Environment</span>
+                      <label className="text-xs font-bold text-slate-800">
+                        {codingLanguage === 'javascript' ? 'JavaScript Starter Code *' : codingLanguage === 'java' ? 'Java Starter Code *' : 'Python Starter Code *'}
+                      </label>
+                      <span className="text-[10px] text-slate-400 font-mono">
+                        {codingLanguage === 'javascript' ? 'Node.js 24 Runtime' : codingLanguage === 'java' ? 'Java 23 Runtime' : 'Python 3.12 Runtime'}
+                      </span>
                     </div>
                     <textarea
-                      rows={4}
+                      rows={5}
                       value={starterCode}
                       onChange={(e) => setStarterCode(e.target.value)}
-                      placeholder="def solve():\n    # Solution starter code\n    pass\n"
+                      placeholder="// Enter starter code"
                       className="w-full bg-slate-900 text-emerald-400 font-mono text-xs border border-slate-700 rounded-xl p-3 outline-none"
                     />
                   </div>
+
 
                   <div>
                     <div className="flex items-center justify-between mb-2">

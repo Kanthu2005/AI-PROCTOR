@@ -47,6 +47,14 @@ export async function apiRequest<T = any>(endpoint: string, options: RequestOpti
     throw error;
   }
 
+  const contentType = response.headers.get('content-type') || '';
+  if (contentType.includes('text/csv') || contentType.includes('text/plain')) {
+    return response.text();
+  }
+  if (contentType.includes('application/pdf') || contentType.includes('application/octet-stream')) {
+    return response.blob();
+  }
+
   return response.json();
 }
 
@@ -243,18 +251,38 @@ export const api = {
   }),
 
   // Coding Sandbox Runner
-  runSandboxCode: (code: string, testCases: any[]) => apiRequest('/sandbox/run', {
+  runSandboxCode: (code: string, testCases: any[], language = 'python') => apiRequest('/sandbox/run', {
     method: 'POST',
-    body: JSON.stringify({ code, test_cases: testCases })
+    body: JSON.stringify({ code, test_cases: testCases, language })
   }),
 
-  // Analytics
+
+  // Evaluation & Descriptive Grading
+  evaluateAttempt: (attemptId: string, recomputeAll = false) => apiRequest(`/attempts/${attemptId}/evaluate?recompute_all=${recomputeAll}`, {
+    method: 'POST'
+  }),
+  manualEvaluateAnswer: (attemptId: string, questionId: string, marksAwarded: number, comments?: string) => apiRequest(`/attempts/${attemptId}/answers/${questionId}/evaluate`, {
+    method: 'POST',
+    body: JSON.stringify({ marks_awarded: marksAwarded, reviewer_comments: comments })
+  }),
+  suggestScore: (attemptId: string, questionId: string) => apiRequest(`/attempts/${attemptId}/answers/${questionId}/suggest-score`, {
+    method: 'POST'
+  }),
+
+  // Analytics & Exports
   getAssessmentAnalytics: (assessmentId: string) => apiRequest(`/analytics/assessments/${assessmentId}`),
+  exportAssessmentReport: (assessmentId: string, format = 'csv') => apiRequest(`/analytics/assessments/${assessmentId}/export?format=${format}`),
+  getCodeSimilarity: (assessmentId: string, questionId?: string, threshold = 0.70) => {
+    let url = `/analytics/assessments/${assessmentId}/code-similarity?threshold=${threshold}`;
+    if (questionId) url += `&question_id=${encodeURIComponent(questionId)}`;
+    return apiRequest(url);
+  },
   getRecruiterDashboard: (orgId?: string) => {
     let url = '/analytics/recruiter/dashboard';
     if (orgId) url += `?org_id=${encodeURIComponent(orgId)}`;
     return apiRequest(url);
   }
 };
+
 
 export default api;

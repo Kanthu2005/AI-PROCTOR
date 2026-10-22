@@ -77,10 +77,8 @@ function MainApp() {
       if (!window.location.hash || tab === 'login') {
         if (user.role === 'CANDIDATE') {
           setActiveTab('candidate_portal');
-        } else if (user.role === 'PROCTOR') {
-          setActiveTab('proctor');
-        } else if (user.role === 'QUESTION_AUTHOR') {
-          setActiveTab('questions');
+        } else if (user.role === 'PLATFORM_ADMIN') {
+          setActiveTab('analytics');
         } else {
           setActiveTab('dashboard');
         }
@@ -134,10 +132,8 @@ function MainApp() {
           setIsCandidateExamMode(false);
           if (role === 'CANDIDATE') {
             setActiveTab('candidate_portal');
-          } else if (role === 'PROCTOR') {
-            setActiveTab('proctor');
-          } else if (role === 'QUESTION_AUTHOR') {
-            setActiveTab('questions');
+          } else if (role === 'PLATFORM_ADMIN') {
+            setActiveTab('analytics');
           } else {
             setActiveTab('dashboard');
           }

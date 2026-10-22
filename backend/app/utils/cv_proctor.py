@@ -188,25 +188,28 @@ class CVProctorEngine:
     ) -> Dict[str, Any]:
         """
         Compares reference photo against target photo.
-        Returns match status, similarity score, and confidence.
+        Returns match status, similarity score, confidence, and review requirements.
+        Never fakes positive verification on missing, corrupted, or unavailable detector frames.
         """
         ref_img = cls._decode_image(reference_base64)
         tgt_img = cls._decode_image(target_base64)
 
         if ref_img is None or tgt_img is None:
             return {
-                "is_match": True,  # Non-blocking fallback for development/mocks
-                "similarity": 0.85,
-                "status": "FALLBACK_ACCEPTED",
+                "is_match": False,
+                "similarity": 0.0,
+                "status": "UNABLE_TO_VERIFY",
+                "requires_manual_review": True,
                 "reason": "Could not decode one or both frames for visual comparison"
             }
 
         cascade = get_face_cascade()
         if cascade is None or not hasattr(cv2, "cvtColor") or not hasattr(cv2, "matchTemplate"):
             return {
-                "is_match": True,
-                "similarity": 0.85,
-                "status": "FALLBACK_ACCEPTED",
+                "is_match": False,
+                "similarity": 0.0,
+                "status": "UNABLE_TO_VERIFY",
+                "requires_manual_review": True,
                 "reason": "OpenCV visual comparison not available in current environment"
             }
 
@@ -223,6 +226,7 @@ class CVProctorEngine:
                     "is_match": False,
                     "similarity": 0.0,
                     "status": "FACE_NOT_FOUND",
+                    "requires_manual_review": True,
                     "reason": "Face not detected in reference or verification frame"
                 }
 
@@ -243,13 +247,16 @@ class CVProctorEngine:
                 "is_match": is_match,
                 "similarity": round(similarity, 4),
                 "threshold": threshold,
-                "status": "MATCH" if is_match else "MISMATCH"
+                "status": "MATCH" if is_match else "MISMATCH",
+                "requires_manual_review": not is_match
             }
         except Exception as e:
             logger.error(f"Error comparing faces: {e}")
             return {
-                "is_match": True,
-                "similarity": 0.75,
-                "status": "ERROR_FALLBACK",
+                "is_match": False,
+                "similarity": 0.0,
+                "status": "UNABLE_TO_VERIFY",
+                "requires_manual_review": True,
                 "error": str(e)
             }
+

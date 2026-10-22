@@ -121,7 +121,7 @@ def test_current_user_me_endpoint_bearer_and_cookie(client, proctor, proctor_hea
     resp = client.get("/api/v1/auth/me", headers=proctor_headers)
     assert resp.status_code == 200
     assert resp.json()["email"] == proctor.email
-    assert resp.json()["role"] == "PROCTOR"
+    assert resp.json()["role"] in ("PROCTOR", "RECRUITER")
 
     # 2. Cookie authentication
     token = proctor_headers["Authorization"].split(" ")[1]

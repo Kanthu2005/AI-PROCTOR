@@ -5,15 +5,15 @@ from app.models.base import BaseModel
 
 
 class Role(str, enum.Enum):
-    ADMIN_RECRUITER = "ADMIN_RECRUITER"
-    CANDIDATE = "CANDIDATE"
     PLATFORM_ADMIN = "PLATFORM_ADMIN"
-    
-    # Backwards-compatible legacy roles mapped into ADMIN_RECRUITER
-    ORG_ADMIN = "ORG_ADMIN"
     RECRUITER = "RECRUITER"
-    QUESTION_AUTHOR = "QUESTION_AUTHOR"
-    PROCTOR = "PROCTOR"
+    CANDIDATE = "CANDIDATE"
+
+    # Backwards-compatible aliases mapping legacy names to RECRUITER
+    ADMIN_RECRUITER = "RECRUITER"
+    ORG_ADMIN = "RECRUITER"
+    QUESTION_AUTHOR = "RECRUITER"
+    PROCTOR = "RECRUITER"
 
     @classmethod
     def normalize(cls, role_val: str) -> "Role":
@@ -21,7 +21,7 @@ class Role(str, enum.Enum):
             return role_val
         val = str(role_val).upper()
         if val in ("RECRUITER", "ORG_ADMIN", "QUESTION_AUTHOR", "PROCTOR", "ADMIN_RECRUITER"):
-            return cls.ADMIN_RECRUITER
+            return cls.RECRUITER
         if val == "PLATFORM_ADMIN":
             return cls.PLATFORM_ADMIN
         return cls.CANDIDATE

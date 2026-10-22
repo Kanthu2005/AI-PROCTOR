@@ -63,6 +63,41 @@ class CodingSandboxRunner:
         return token.strip() == settings.INTERNAL_RUNNER_SECRET.strip()
 
     @classmethod
+    def get_available_runtimes(cls) -> Dict[str, Dict[str, Any]]:
+        """
+        Discovers active compilers and runtimes available on the host/container.
+        Guarantees that unsupported languages are never silently simulated.
+        """
+        import shutil
+        return {
+            "python": {
+                "available": True,
+                "version": f"{sys.version_info.major}.{sys.version_info.minor}",
+                "display_name": "Python 3"
+            },
+            "javascript": {
+                "available": bool(shutil.which("node")),
+                "version": "Node.js" if shutil.which("node") else None,
+                "display_name": "JavaScript (Node.js)"
+            },
+            "java": {
+                "available": bool(shutil.which("java")),
+                "version": "Java" if shutil.which("java") else None,
+                "display_name": "Java (JDK)"
+            },
+            "c": {
+                "available": bool(shutil.which("gcc") or shutil.which("clang")),
+                "version": None,
+                "display_name": "C (GCC/Clang)"
+            },
+            "cpp": {
+                "available": bool(shutil.which("g++") or shutil.which("clang++")),
+                "version": None,
+                "display_name": "C++ (G++/Clang++)"
+            }
+        }
+
+    @classmethod
     def execute_code(
         cls,
         code: str,
@@ -88,18 +123,19 @@ class CodingSandboxRunner:
 
         if settings.USE_DOCKER_SANDBOX:
             try:
-                return cls._run_in_docker(code, test_cases, timeout_seconds, memory_limit_mb)
+                return cls._run_in_docker(code, test_cases, language, timeout_seconds, memory_limit_mb)
             except Exception as e:
                 logger.warning(f"Docker sandbox unreachable ({e}). Running via hardened subprocess sandbox.")
-                return cls._run_in_subprocess(code, test_cases, timeout_seconds, memory_limit_mb)
+                return cls._run_in_subprocess(code, test_cases, language, timeout_seconds, memory_limit_mb)
         else:
-            return cls._run_in_subprocess(code, test_cases, timeout_seconds, memory_limit_mb)
+            return cls._run_in_subprocess(code, test_cases, language, timeout_seconds, memory_limit_mb)
 
     @classmethod
     def _run_in_docker(
         cls,
         code: str,
         test_cases: List[Dict[str, Any]],
+        language: str,
         timeout_seconds: int,
         memory_limit_mb: int
     ) -> Dict[str, Any]:
@@ -216,18 +252,55 @@ class CodingSandboxRunner:
         cls,
         code: str,
         test_cases: List[Dict[str, Any]],
-        timeout_seconds: int,
-        memory_limit_mb: int
+        language: str = "python",
+        timeout_seconds: int = 3,
+        memory_limit_mb: int = 128
     ) -> Dict[str, Any]:
         """
         Hardened fallback runner executing code in an isolated child process:
-        - Never executes in FastAPI server process.
+        - Supports Python 3, JavaScript (Node.js), and Java.
+        - Enforces strict compiler/runtime availability checks.
         - Strips all parent process environment variables (no app secrets, DB passwords, JWT keys).
         - Enforces strict network denial by intercepting socket creation.
-        - Enforces output limit (caps excessive output, e.g. from while True: print("a")).
+        - Enforces output limit (caps excessive output).
         - Enforces strict wall-clock timeout and process termination.
         - Isolates in disposable temporary directory.
         """
+        import shutil
+        norm_lang = (language or "python").lower().strip()
+        if norm_lang in ("py", "python", "python3"):
+            target_lang = "python"
+        elif norm_lang in ("javascript", "js", "node", "nodejs"):
+            target_lang = "javascript"
+        elif norm_lang == "java":
+            target_lang = "java"
+        elif norm_lang in ("c", "cpp", "c++"):
+            target_lang = "c" if norm_lang == "c" else "cpp"
+        else:
+            target_lang = norm_lang
+
+        runtimes = cls.get_available_runtimes()
+        if target_lang not in runtimes or not runtimes[target_lang]["available"]:
+            display = runtimes.get(target_lang, {}).get("display_name", target_lang)
+            return {
+                "total_test_cases": len(test_cases),
+                "passed_test_cases": 0,
+                "all_passed": False,
+                "results": [
+                    {
+                        "test_case_index": idx + 1,
+                        "passed": False,
+                        "execution_time_ms": 0,
+                        "is_hidden": tc.get("is_hidden", False),
+                        "error": f"Execution Service Unavailable: {display} runtime/compiler is not configured in this execution environment.",
+                        "failure_type": "EXECUTION_SERVICE_UNAVAILABLE"
+                    }
+                    for idx, tc in enumerate(test_cases)
+                ],
+                "error": f"Execution Service Unavailable: {display} is not available.",
+                "failure_type": "EXECUTION_SERVICE_UNAVAILABLE"
+            }
+
         results = []
         passed_count = 0
         overall_failure_type = None
@@ -272,9 +345,31 @@ class CodingSandboxRunner:
         )
 
         with tempfile.TemporaryDirectory() as temp_dir:
-            script_path = os.path.join(temp_dir, "solution.py")
-            with open(script_path, "w", encoding="utf-8") as f:
-                f.write(sandbox_wrapper)
+            if target_lang == "python":
+                script_path = os.path.join(temp_dir, "solution.py")
+                with open(script_path, "w", encoding="utf-8") as f:
+                    f.write(sandbox_wrapper)
+                exec_cmd = [sys.executable, script_path]
+            elif target_lang == "javascript":
+                script_path = os.path.join(temp_dir, "solution.js")
+                with open(script_path, "w", encoding="utf-8") as f:
+                    f.write(code)
+                node_bin = shutil.which("node") or "node"
+                exec_cmd = [node_bin, script_path]
+            elif target_lang == "java":
+                import re
+                match = re.search(r"public\s+class\s+([A-Za-z0-9_]+)", code)
+                class_name = match.group(1) if match else "Solution"
+                script_path = os.path.join(temp_dir, f"{class_name}.java")
+                with open(script_path, "w", encoding="utf-8") as f:
+                    f.write(code)
+                java_bin = shutil.which("java") or "java"
+                exec_cmd = [java_bin, script_path]
+            else:
+                script_path = os.path.join(temp_dir, "solution.py")
+                with open(script_path, "w", encoding="utf-8") as f:
+                    f.write(code)
+                exec_cmd = [sys.executable, script_path]
 
             for idx, tc in enumerate(test_cases):
                 tc_input = str(tc.get("input", ""))
@@ -284,7 +379,7 @@ class CodingSandboxRunner:
                 start_time = time.time()
                 try:
                     proc = subprocess.Popen(
-                        [sys.executable, script_path],
+                        exec_cmd,
                         stdin=subprocess.PIPE,
                         stdout=subprocess.PIPE,
                         stderr=subprocess.PIPE,

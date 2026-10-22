@@ -97,11 +97,8 @@ def test_send_exam_invitations_unauthorized_roles(client, test_org, recruiter_he
         "candidates": [{"email": "target@example.com", "full_name": "Target Candidate"}]
     }
 
-    # Question Author cannot invite candidates
-    resp_author = client.post(f"/api/v1/assessments/{a_id}/invitations", json=payload, headers=author_headers)
-    assert resp_author.status_code == 403
-
-    # Candidate cannot invite candidates
+    # In the consolidated 3-role model, author is mapped to RECRUITER.
+    # Candidates are strictly unauthorized from sending invitations.
     resp_cand = client.post(f"/api/v1/assessments/{a_id}/invitations", json=payload, headers=candidate_headers)
     assert resp_cand.status_code == 403
 

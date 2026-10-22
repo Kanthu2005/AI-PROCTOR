@@ -15,7 +15,7 @@ from app.services.evaluation_service import EvaluationService
 from app.schemas.evaluation import (
     ManualEvaluationRequest, ManualEvaluationResponse, AISuggestScoreResponse, EvaluationResultResponse
 )
-from app.dependencies import get_current_user, require_roles, verify_tenant_access
+from app.dependencies import get_current_user, get_optional_current_user, require_roles, verify_tenant_access
 
 router = APIRouter(prefix="/attempts", tags=["Candidate Test Engine & Attempts"])
 
@@ -142,6 +142,13 @@ def submit_attempt(
     flagged_count = len([a for a in attempt.answers if a.is_flagged_for_review])
     unanswered_count = max(0, total_q - answered_count)
 
+    pub_policy = getattr(attempt.assessment, 'result_publication_policy', 'MANUAL') if attempt.assessment else 'MANUAL'
+    is_released = bool(
+        getattr(attempt, 'is_result_released', False) or
+        (attempt.assessment and getattr(attempt.assessment, 'is_results_released', False)) or
+        (pub_policy == "IMMEDIATE")
+    )
+
     response_payload = {
         "attempt_id": attempt.id,
         "candidate_name": attempt.candidate_name,
@@ -154,33 +161,51 @@ def submit_attempt(
         "answered_count": answered_count,
         "unanswered_count": unanswered_count,
         "flagged_count": flagged_count,
-        "is_result_released": getattr(attempt, 'is_result_released', False),
-        "results_policy": getattr(attempt.assessment, 'result_publication_policy', 'MANUAL'),
-        "message": "Your examination has been securely finalized and recorded in the ProctorAI database. Evaluation and integrity checks are under recruiter review."
+        "is_result_released": is_released,
+        "results_policy": pub_policy,
+        "message": (
+            "Your examination has been submitted successfully."
+            if is_released else
+            "Your examination has been submitted successfully. Your responses have been recorded. Results will be available after evaluation and recruiter review."
+        )
     }
 
-    pub_policy = getattr(attempt.assessment, 'result_publication_policy', 'MANUAL')
-    if pub_policy == "IMMEDIATE" or getattr(attempt, 'is_result_released', False):
+    if is_released:
         response_payload["total_score"] = attempt.total_score
         response_payload["total_max_marks"] = attempt.total_max_marks
         response_payload["percentage"] = attempt.percentage
         response_payload["is_passed"] = attempt.is_passed
-        response_payload["rank"] = attempt.rank
-        response_payload["percentile"] = attempt.percentile
-        response_payload["risk_score"] = attempt.risk_score
-        response_payload["risk_level"] = attempt.risk_level.value
 
     return response_payload
+
 
 
 @router.get("/{attempt_id}/result", response_model=Dict[str, Any])
 def get_attempt_result(
     attempt_id: str,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: Optional[User] = Depends(get_optional_current_user)
 ):
     attempt = db.query(Attempt).filter(Attempt.id == attempt_id).first()
     if not attempt:
         raise HTTPException(status_code=404, detail="Attempt not found")
+
+    # Enforce Object Ownership and Tenant Access Control
+    is_recruiter = False
+    if current_user:
+        if current_user.role == Role.CANDIDATE:
+            if current_user.email.lower() != attempt.candidate_email.lower():
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Access denied: You cannot view results belonging to another candidate"
+                )
+        elif current_user.role in (Role.RECRUITER, Role.PLATFORM_ADMIN):
+            if current_user.role != Role.PLATFORM_ADMIN and attempt.assessment and attempt.assessment.org_id != current_user.org_id:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Access denied: You cannot view results belonging to another organization"
+                )
+            is_recruiter = True
 
     pub_policy = getattr(attempt.assessment, 'result_publication_policy', 'MANUAL') if attempt.assessment else 'MANUAL'
     is_released = bool(
@@ -189,8 +214,8 @@ def get_attempt_result(
         (pub_policy == "IMMEDIATE")
     )
 
-    if not is_released:
-        # Candidate receipt view: scores and pass/fail strictly withheld until recruiter sends/releases
+    # If unreleased and caller is NOT a recruiter/admin, strictly withhold scores and evaluation data
+    if not is_released and not is_recruiter:
         return {
             "attempt_id": attempt.id,
             "assessment_id": attempt.assessment_id,
@@ -202,11 +227,11 @@ def get_attempt_result(
             "submitted_at": attempt.submitted_at,
             "is_result_released": False,
             "result_decision": "PENDING_REVIEW",
-            "message": "Examination finalized. Performance evaluation and proctoring telemetry are currently under recruiter review."
+            "message": "Your examination has been submitted successfully. Your responses have been recorded. Results will be available after evaluation and recruiter review."
         }
 
     section_breakdown = []
-    if getattr(attempt.assessment, 'allow_candidate_answer_review', False):
+    if is_recruiter or getattr(attempt.assessment, 'allow_candidate_answer_review', False):
         answers = attempt.answers
         for ans in answers:
             section_breakdown.append({
@@ -218,7 +243,7 @@ def get_attempt_result(
                 "is_flagged_for_review": ans.is_flagged_for_review
             })
 
-    return {
+    result_payload = {
         "attempt_id": attempt.id,
         "assessment_id": attempt.assessment_id,
         "candidate_name": attempt.candidate_name,
@@ -230,16 +255,22 @@ def get_attempt_result(
         "total_max_marks": attempt.total_max_marks,
         "percentage": attempt.percentage,
         "is_passed": (attempt.result_decision == "PASSED") if getattr(attempt, 'result_decision', None) else attempt.is_passed,
-        "is_result_released": True,
+        "is_result_released": is_released,
         "result_decision": getattr(attempt, 'result_decision', None) or ("PASSED" if attempt.is_passed else "COMPLETED"),
         "result_released_at": attempt.result_released_at.isoformat() if attempt.result_released_at else None,
         "recruiter_feedback": getattr(attempt, 'recruiter_feedback', None),
         "rank": attempt.rank,
         "percentile": attempt.percentile,
-        "risk_level": attempt.risk_level.value,
         "submitted_at": attempt.submitted_at,
         "section_breakdown": section_breakdown
     }
+
+    # Internal Proctoring Risk Telemetry is strictly reserved for Recruiters and Admins
+    if is_recruiter:
+        result_payload["risk_level"] = attempt.risk_level.value
+        result_payload["risk_score"] = attempt.risk_score
+
+    return result_payload
 
 
 class SendCandidateResultRequest(BaseModel):

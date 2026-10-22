@@ -76,9 +76,11 @@ class AttemptService:
         # Validate assessment lifecycle state
         if assessment.status == AssessmentStatus.CLOSED:
             raise HTTPException(
-                status_code=400,
+                status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Cannot take assessment in 'CLOSED' status"
             )
+
+
 
         # Validate schedule window if applicable
         if assessment.start_time and assessment.status == AssessmentStatus.SCHEDULED:

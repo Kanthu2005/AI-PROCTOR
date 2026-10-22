@@ -226,11 +226,10 @@ class ProctoringService:
                     "rule_version": settings.PROCTORING_RULE_VERSION
                 }
 
-        # B. Sliding-window deduplication for rapid bursts (applies when client_timestamp or dedup flag is provided)
+        # B. Sliding-window deduplication for rapid bursts (e.g. repeated face_missing, audio noise, or client bursts)
         dedup_window = cfg.get("dedup_window_seconds", settings.PROCTORING_DEDUP_WINDOW_SECONDS)
-        should_check_window = (event_in.client_timestamp is not None) or event_in.metadata.get("check_dedup", False)
-
-        if should_check_window:
+        should_check_window = (event_in.client_timestamp is not None) or event_in.metadata.get("check_dedup", False) or (event_in.event_type in (EventType.FACE_MISSING, EventType.VOICE_DETECTED, EventType.MULTIPLE_FACES))
+        if should_check_window and dedup_window > 0:
             last_same_incident = db.query(ProctoringIncident).filter(
                 ProctoringIncident.attempt_id == attempt.id,
                 ProctoringIncident.event_type == event_in.event_type

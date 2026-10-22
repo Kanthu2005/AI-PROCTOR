@@ -63,10 +63,10 @@ export default function RecruiterDashboard({
   };
 
   // Stat Cards (Real API Driven)
-  const totalAssessments = dashboardData?.total_assessments ?? 12;
-  const totalCandidates = dashboardData?.total_candidates ?? 248;
-  const completedCandidates = dashboardData?.total_completed ?? 187;
-  const alertsCount = dashboardData?.alerts_count ?? 24;
+  const totalAssessments = dashboardData?.total_assessments ?? 0;
+  const totalCandidates = dashboardData?.total_candidates ?? 0;
+  const completedCandidates = dashboardData?.total_completed ?? 0;
+  const alertsCount = dashboardData?.alerts_count ?? 0;
 
   const stats = [
     {
@@ -88,7 +88,7 @@ export default function RecruiterDashboard({
     {
       label: 'Completed',
       value: completedCandidates.toString(),
-      trend: `${dashboardData?.pass_rate ?? 76}% pass rate`,
+      trend: `${dashboardData?.pass_rate ?? 0}% pass rate`,
       isPositive: true,
       iconBg: 'bg-purple-50 text-purple-600',
       icon: CheckCircle2

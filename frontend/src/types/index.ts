@@ -1,9 +1,6 @@
 export type UserRole =
   | 'PLATFORM_ADMIN'
-  | 'ORG_ADMIN'
   | 'RECRUITER'
-  | 'QUESTION_AUTHOR'
-  | 'PROCTOR'
   | 'CANDIDATE';
 
 export interface User {

@@ -16,26 +16,22 @@ import { useAuth } from '../context/AuthContext';
 export default function Sidebar({ activeTab, setActiveTab, mobileOpen, onCloseMobile }) {
   const { user, logout } = useAuth();
 
-  const isProctor = user?.role === 'PROCTOR';
-  const isAuthor = user?.role === 'QUESTION_AUTHOR';
+  const isPlatformAdmin = user?.role === 'PLATFORM_ADMIN';
 
   let menuItems = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { id: 'assessments', label: 'Assessments', icon: FileText },
     { id: 'questions', label: 'Question Bank', icon: BookOpen },
     { id: 'candidates', label: 'Candidates', icon: Users },
-    { id: 'analytics', label: 'Analytics', icon: TrendingUp }
+    { id: 'proctor', label: 'Live Surveillance', icon: Eye, hasAlert: true },
+    { id: 'analytics', label: 'Results & Analytics', icon: TrendingUp }
   ];
 
-  if (isProctor) {
+  if (isPlatformAdmin) {
     menuItems = [
-      { id: 'proctor', label: 'Live Surveillance', icon: Eye, hasAlert: true },
-      { id: 'analytics', label: 'Integrity Analytics', icon: TrendingUp }
-    ];
-  } else if (isAuthor) {
-    menuItems = [
-      { id: 'questions', label: 'Question Bank', icon: BookOpen },
-      { id: 'assessments', label: 'Assessments', icon: FileText }
+      { id: 'analytics', label: 'Platform Telemetry', icon: TrendingUp },
+      { id: 'dashboard', label: 'Organization Overview', icon: LayoutDashboard },
+      { id: 'assessments', label: 'Global Assessments', icon: FileText }
     ];
   }
 

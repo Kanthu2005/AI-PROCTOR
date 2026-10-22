@@ -864,8 +864,9 @@ export default function AssessmentBuilder({ onOpenCandidateInvite, onLaunchCandi
                       <option value="MCQ_MULTIPLE">MCQ Multiple</option>
                       <option value="TRUE_FALSE">True / False</option>
                       <option value="DESCRIPTIVE">Descriptive</option>
-                      <option value="CODING">Python Coding</option>
+                      <option value="CODING">Coding (Multi-Language)</option>
                     </select>
+
                   </div>
 
                   {/* Questions List */}

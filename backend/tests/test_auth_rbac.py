@@ -113,4 +113,5 @@ def test_get_me_returns_current_authenticated_profile(client, proctor, proctor_h
     data = response.json()
     assert data["id"] == proctor.id
     assert data["email"] == proctor.email
-    assert data["role"] == "PROCTOR"
+    assert data["role"] in ("PROCTOR", "RECRUITER")
+

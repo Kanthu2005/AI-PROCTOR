@@ -59,3 +59,29 @@ def export_assessment_report(
     else:
         return EvaluationService.export_assessment_report_csv(db, assessment_id, current_user)
 
+
+@router.get("/assessments/{assessment_id}/code-similarity")
+def get_assessment_code_similarity(
+    assessment_id: str,
+    question_id: str = None,
+    threshold: float = 0.70,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles(Role.RECRUITER, Role.ORG_ADMIN, Role.PLATFORM_ADMIN))
+):
+    """
+    Computes pairwise code similarity matrix across submitted candidate attempts.
+    Treats similarity as an advisory recruiter review signal, not definitive proof of plagiarism.
+    """
+    from app.models.assessment import Assessment
+    from app.services.code_similarity_service import CodeSimilarityService
+    assessment = db.query(Assessment).filter(Assessment.id == assessment_id).first()
+    if not assessment:
+        raise HTTPException(status_code=404, detail="Assessment not found")
+    verify_tenant_access(assessment.org_id, current_user, db)
+    return CodeSimilarityService.analyze_assessment_code_similarity(
+        db=db,
+        assessment_id=assessment_id,
+        question_id=question_id,
+        threshold=threshold
+    )
+

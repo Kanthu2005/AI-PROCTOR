@@ -307,10 +307,42 @@ export default function CandidateExamEngine({ defaultToken = '', onBackToHome })
       }
     };
 
+    // 3. Clipboard Paste Tracking
+    const handlePaste = (e) => {
+      if (rules?.prevent_copy_paste !== false) {
+        api.sendProctorEvent(attemptId, {
+          event_type: 'COPY_PASTE_ATTEMPT',
+          metadata: { action: 'paste', target: e.target?.tagName || 'UNKNOWN', len: e.clipboardData?.getData('text')?.length || 0 },
+          client_timestamp: new Date().toISOString()
+        }).then(res => {
+          if (res?.explanation) {
+            setProctorWarning(res.explanation);
+            setTimeout(() => setProctorWarning(null), 5000);
+          }
+        }).catch(() => {});
+      }
+    };
+
+    // 4. Window Focus Loss (Blur) Tracking
+    const handleWindowBlur = () => {
+      api.sendProctorEvent(attemptId, {
+        event_type: 'TAB_SWITCH',
+        metadata: { reason: 'window_blur' },
+        client_timestamp: new Date().toISOString()
+      }).then(res => {
+        if (res?.explanation) {
+          setProctorWarning(res.explanation);
+          setTimeout(() => setProctorWarning(null), 5000);
+        }
+      }).catch(() => {});
+    };
+
     document.addEventListener('visibilitychange', handleVisibilityChange);
     document.addEventListener('fullscreenchange', handleFullscreenChange);
+    document.addEventListener('paste', handlePaste);
+    window.addEventListener('blur', handleWindowBlur);
 
-    // 3. Periodic Face Detection Check (every 12 seconds)
+    // 5. Periodic Face Detection Check (every 12 seconds)
     const faceInterval = setInterval(async () => {
       if (!examVideoRef.current || !mediaStream) {
         setFaceStatus('Camera Disconnected');
@@ -356,6 +388,8 @@ export default function CandidateExamEngine({ defaultToken = '', onBackToHome })
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
       document.removeEventListener('fullscreenchange', handleFullscreenChange);
+      document.removeEventListener('paste', handlePaste);
+      window.removeEventListener('blur', handleWindowBlur);
       clearInterval(faceInterval);
     };
   }, [stage, isSubmitted, attemptId, mediaStream, rules]);
@@ -649,7 +683,28 @@ export default function CandidateExamEngine({ defaultToken = '', onBackToHome })
     triggerAutosave(newAnswers, qid);
   };
 
-  // Navigate to Question
+  // Run candidate code against public test cases in sandbox
+  const handleRunCode = async (codeToRun) => {
+    const curQ = examData?.questions?.[currentQuestionIdx];
+    if (!curQ) return;
+    const testCases = curQ.coding_details?.public_test_cases || [];
+    const language = curQ.coding_details?.language || 'python';
+
+    try {
+      setRunningSandbox(true);
+      setSandboxOutput(null);
+      const res = await api.runSandboxCode(codeToRun, testCases, language);
+      setSandboxOutput(res);
+    } catch (err) {
+      setSandboxOutput({
+        error: true,
+        message: err.message || 'Sandbox runner execution failed. Please check your syntax.'
+      });
+    } finally {
+      setRunningSandbox(false);
+    }
+  };
+
   const handleSelectQuestion = (idx) => {
     if (rules?.navigation_mode === 'FORWARD_ONLY' && idx < currentQuestionIdx) {
       alert('Forward-only navigation is enforced for this assessment. You cannot return to previous questions.');
@@ -711,50 +766,6 @@ export default function CandidateExamEngine({ defaultToken = '', onBackToHome })
         });
       }
       setStage('RESULT');
-    }
-  };
-
-  // Run Code in Sandbox
-  const handleRunCode = async (code) => {
-    setRunningSandbox(true);
-    try {
-      const curQ = examData?.questions?.[currentQuestionIdx];
-      const testCases = curQ?.coding_details?.public_test_cases || [
-        { input: '4 12 8 30 2', expected_output: '30' }
-      ];
-      const res = await api.runSandboxCode(code, testCases).catch((err) => ({ error: err.message || 'Failed to connect to execution sandbox' }));
-      if (res && res.passed_test_cases !== undefined) {
-        const passed = res.passed_test_cases;
-        const total = res.total_test_cases || testCases.length;
-        const details = (res.results || []).map((r, i) => {
-          let line = `Test Case #${i+1}: ${r.passed ? 'PASSED ✓' : 'FAILED ✗'} (${r.execution_time_ms || 0}ms)`;
-          if (!r.passed && r.failure_type) {
-            line += ` [${r.failure_type}]`;
-          }
-          if (r.error) {
-            line += `\n  Error: ${r.error}`;
-          }
-          return line;
-        }).join('\n\n');
-        const verdict = res.all_passed ? 'ACCEPTED (ALL PASSED)' : (res.failure_type || (passed > 0 ? 'PARTIAL' : 'FAILED'));
-        setSandboxOutput({
-          stdout: `${details}\n\n----------------------------------------\nExecution Summary: ${passed}/${total} test cases passed.\nVerdict: ${verdict}`
-        });
-      } else if (res && res.error) {
-        setSandboxOutput({
-          stdout: `Execution Failed:\n${res.error}\nVerdict: ${res.failure_type || 'RUNTIME_ERROR'}`
-        });
-      } else {
-        setSandboxOutput({
-          stdout: 'Execution Error: Unable to complete test execution in the sandbox.'
-        });
-      }
-    } catch (e) {
-      setSandboxOutput({
-        stdout: `Execution Exception: ${e?.message || 'Unexpected sandbox error.'}`
-      });
-    } finally {
-      setRunningSandbox(false);
     }
   };
 
@@ -1233,8 +1244,23 @@ export default function CandidateExamEngine({ defaultToken = '', onBackToHome })
             </span>
           </div>
 
-          {/* Right: Autosave Status & End Test Button */}
+          {/* Right: Mode Badge, Autosave Status & End Test Button */}
           <div className="flex items-center space-x-3">
+            {/* Delivery Mode Badge */}
+            <div className="hidden lg:flex items-center space-x-1.5 px-2.5 py-1 rounded-lg border text-xs font-semibold bg-slate-50 border-slate-200">
+              {examData?.seb_verified || examData?.rules?.seb_required ? (
+                <>
+                  <ShieldAlert className="w-3.5 h-3.5 text-emerald-600" />
+                  <span className="text-emerald-700">Verified Secure Browser (SEB)</span>
+                </>
+              ) : (
+                <>
+                  <Monitor className="w-3.5 h-3.5 text-blue-600" />
+                  <span className="text-slate-600">Standard Browser Mode</span>
+                </>
+              )}
+            </div>
+
             {/* Autosave Ack Badge */}
             <div className="hidden sm:flex items-center space-x-1.5 text-xs font-semibold px-2.5 py-1 rounded-lg border bg-slate-50 border-slate-200">
               {autosaveStatus === 'saving' && (
@@ -1456,46 +1482,118 @@ export default function CandidateExamEngine({ defaultToken = '', onBackToHome })
                     </div>
                   )}
 
-                  {/* 6. Python Coding Question */}
-                  {curQ?.question_type === 'CODING' && (
-                    <div className="space-y-3">
-                      <div className="flex items-center justify-between text-xs">
-                        <span className="font-bold text-slate-700 flex items-center space-x-1.5">
-                          <Code2 className="w-4 h-4 text-blue-600" />
-                          <span>Python 3 Sandbox Editor</span>
-                        </span>
-                        <button
-                          type="button"
-                          disabled={runningSandbox}
-                          onClick={() => handleRunCode(curAns.code_response || curQ.coding_details?.starter_code || '')}
-                          className="px-3.5 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs flex items-center space-x-1.5 shadow-2xs transition"
-                        >
-                          <Play className="w-3.5 h-3.5 text-emerald-400 fill-current" />
-                          <span>{runningSandbox ? 'Executing Sandbox...' : 'Run Public Tests'}</span>
-                        </button>
-                      </div>
+                  {/* 6. Multi-Language Coding Question */}
+                  {curQ?.question_type === 'CODING' && (() => {
+                    const lang = curQ.coding_details?.language || 'python';
+                    const fileNames = {
+                      python: 'solution.py',
+                      javascript: 'solution.js',
+                      java: 'Solution.java',
+                      c: 'solution.c',
+                      cpp: 'solution.cpp'
+                    };
+                    const langLabels = {
+                      python: 'Python 3.12 Sandbox',
+                      javascript: 'Node.js 24 Sandbox',
+                      java: 'Java 23 Sandbox',
+                      c: 'C Runtime',
+                      cpp: 'C++ Runtime'
+                    };
+                    const activeFileName = fileNames[lang] || 'solution.txt';
+                    const activeLangLabel = langLabels[lang] || `${lang.toUpperCase()} Sandbox`;
+                    const publicCases = curQ.coding_details?.public_test_cases || [];
 
-                      <div className="rounded-2xl border border-slate-800 bg-[#0d1526] overflow-hidden text-white font-mono text-xs">
-                        <div className="h-8 bg-[#090d17] px-4 flex items-center justify-between border-b border-slate-800/80 text-[11px] text-slate-400">
-                          <span>main.py</span>
-                          <span>Python 3.12 Isolated Sandbox</span>
+                    return (
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="font-bold text-slate-700 flex items-center space-x-1.5">
+                            <Code2 className="w-4 h-4 text-blue-600" />
+                            <span>{activeLangLabel} Editor</span>
+                          </span>
+                          <button
+                            type="button"
+                            disabled={runningSandbox}
+                            onClick={() => handleRunCode(curAns.code_response !== undefined ? curAns.code_response : (curQ.coding_details?.starter_code || ''))}
+                            className="px-3.5 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs flex items-center space-x-1.5 shadow-2xs transition disabled:opacity-50"
+                          >
+                            <Play className="w-3.5 h-3.5 text-emerald-400 fill-current" />
+                            <span>{runningSandbox ? 'Executing Sandbox...' : `Run Public Tests (${publicCases.length})`}</span>
+                          </button>
                         </div>
-                        <textarea
-                          rows={10}
-                          value={curAns.code_response !== undefined ? curAns.code_response : (curQ.coding_details?.starter_code || '# Write your solution\n')}
-                          onChange={(e) => handleUpdateAnswer('code_response', e.target.value)}
-                          className="w-full bg-transparent p-4 outline-none font-mono text-xs leading-relaxed text-blue-200 resize-y"
-                          spellCheck={false}
-                        />
-                      </div>
 
-                      {sandboxOutput && (
-                        <div className="p-3.5 rounded-2xl bg-slate-900 text-emerald-400 font-mono text-xs border border-slate-800 whitespace-pre-wrap">
-                          {sandboxOutput.stdout}
+                        <div className="rounded-2xl border border-slate-800 bg-[#0d1526] overflow-hidden text-white font-mono text-xs shadow-inner">
+                          <div className="h-8 bg-[#090d17] px-4 flex items-center justify-between border-b border-slate-800/80 text-[11px] text-slate-400">
+                            <span className="text-emerald-400 font-bold">{activeFileName}</span>
+                            <span className="text-slate-400 font-sans">{activeLangLabel}</span>
+                          </div>
+                          <textarea
+                            rows={12}
+                            value={curAns.code_response !== undefined ? curAns.code_response : (curQ.coding_details?.starter_code || '# Write your solution\n')}
+                            onChange={(e) => handleUpdateAnswer('code_response', e.target.value)}
+                            className="w-full bg-transparent p-4 outline-none font-mono text-xs leading-relaxed text-blue-100 resize-y"
+                            spellCheck={false}
+                          />
                         </div>
-                      )}
-                    </div>
-                  )}
+
+                        {/* Test Execution Output */}
+                        {sandboxOutput && (
+                          <div className="rounded-2xl border border-slate-800 bg-slate-900/95 p-4 text-xs font-mono space-y-3 text-slate-200">
+                            {sandboxOutput.error ? (
+                              <div className="p-3 rounded-xl bg-rose-950/60 border border-rose-800/60 text-rose-300">
+                                <span className="font-bold block mb-1">Execution Failure:</span>
+                                <p className="font-mono text-xs whitespace-pre-wrap">{sandboxOutput.message}</p>
+                              </div>
+                            ) : (
+                              <>
+                                <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                                  <span className="font-bold text-slate-300">
+                                    Results: {sandboxOutput.passed_test_cases} / {sandboxOutput.total_test_cases} Passed
+                                  </span>
+                                  <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
+                                    sandboxOutput.all_passed ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40' : 'bg-rose-500/20 text-rose-300 border border-rose-500/40'
+                                  }`}>
+                                    {sandboxOutput.all_passed ? 'ALL PASSED' : 'TESTS FAILED'}
+                                  </span>
+                                </div>
+
+                                <div className="space-y-2">
+                                  {(sandboxOutput.results || []).map((tcRes, tIdx) => (
+                                    <div key={tIdx} className={`p-3 rounded-xl border text-xs ${
+                                      tcRes.passed ? 'bg-emerald-950/30 border-emerald-800/40' : 'bg-rose-950/30 border-rose-800/40'
+                                    }`}>
+                                      <div className="flex items-center justify-between mb-1.5">
+                                        <span className="font-bold text-slate-300">Test Case #{tIdx + 1}</span>
+                                        <span className={`text-[11px] font-bold ${tcRes.passed ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                          {tcRes.status || (tcRes.passed ? 'PASSED' : 'FAILED')}
+                                          {tcRes.execution_time_ms !== undefined && ` (${tcRes.execution_time_ms}ms)`}
+                                        </span>
+                                      </div>
+                                      {tcRes.input && (
+                                        <div className="text-[11px] text-slate-400 mb-1">
+                                          <span className="text-slate-500">Input:</span> {tcRes.input}
+                                        </div>
+                                      )}
+                                      <div className="grid grid-cols-2 gap-2 text-[11px]">
+                                        <div>
+                                          <span className="text-slate-500 block">Expected:</span>
+                                          <div className="text-emerald-300/90 bg-black/40 p-1.5 rounded">{tcRes.expected_output || '—'}</div>
+                                        </div>
+                                        <div>
+                                          <span className="text-slate-500 block">Output:</span>
+                                          <div className="text-slate-200 bg-black/40 p-1.5 rounded whitespace-pre-wrap">{tcRes.stdout || tcRes.stderr || '—'}</div>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              </>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
+
 
                   {/* 7. SQL Coding Question */}
                   {curQ?.question_type === 'SQL' && (
